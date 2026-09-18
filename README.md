@@ -46,10 +46,9 @@ season simulation. Generated datasets and simulations stay local under
 
 ## Automatic availability
 
-Current Serie A absences and doubts can be refreshed from API-Football. Set
-`API_FOOTBALL_KEY` in the environment before starting the native API, or add it
-to `deploy/.env` when using Docker. The key stays in the Python backend and is
-never sent to the browser.
+Current Serie A injuries can be refreshed from the authorized public
+Fantacalcio Online injury list. No authentication or browser-side secret is
+required: the Python backend downloads and validates the HTML page.
 
 Successful snapshots are stored locally under `data/updates/` and remain
 available offline if the provider cannot be reached. This first version is an

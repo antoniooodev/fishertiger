@@ -692,9 +692,9 @@ export function InjuryUpdates({ injuryState }) {
   const rows = (players) => (
     <div className="listone-entry-list injury-update-list">
       {players.map((player) => (
-        <p key={`${player.provider_player_id}-${player.fixture_id || "fixture"}`}>
+        <p key={`${player.provider_team_name}-${player.provider_player_name}`}>
           <strong>{player.role ? `${player.role} · ` : ""}{player.fantacalcio_name}</strong>
-          <span>{player.fantacalcio_team} · {player.provider_type} · {player.reason || "Motivo non indicato"}</span>
+          <span>{player.fantacalcio_team} · {player.reason || "Motivo non indicato"} · rientro {player.expected_return || "non indicato"} · {player.return_date_source || "fonte data non indicata"}</span>
         </p>
       ))}
     </div>
@@ -707,19 +707,16 @@ export function InjuryUpdates({ injuryState }) {
         <span className={`update-state ${status.state}`}>{INJURY_STATE_LABELS[status.state]}</span>
       </header>
       <div className="update-source-meta">
-        <div><span>Fonte</span><strong>API-Football</strong></div>
+        <div><span>Fonte</span><strong>{view.sourceLabel}</strong></div>
         <div><span>Ultimo controllo riuscito</span><strong>{snapshot?.checked_at?.slice(0, 16).replace("T", " ") || "Mai"}</strong></div>
         <div><span>Età cache</span><strong>{ageLabel(status.cacheAgeSeconds)}</strong></div>
       </div>
       <div className="update-actions">
-        <button className="update-check-button" type="button" onClick={refresh} disabled={busy || !status.configured}>
+        <button className="update-check-button" type="button" onClick={refresh} disabled={busy}>
           <ActionIcon name="refresh" />
           <span>{busy ? "Aggiornamento..." : "Aggiorna ora"}</span>
         </button>
       </div>
-      {view.unconfiguredMessage ? (
-        <p className="update-message">{view.unconfiguredMessage}</p>
-      ) : null}
       {view.warningMessage ? (
         <p className="update-message error" role="alert">
           {view.warningMessage}
@@ -737,7 +734,7 @@ export function InjuryUpdates({ injuryState }) {
           <summary>Identità non risolte <b>{view.unresolved.length}</b></summary>
           <div className="listone-entry-list injury-update-list">
             {view.unresolved.map((player, index) => (
-              <p key={`${player.provider_player_id}-${index}`}>
+              <p key={`${player.provider_team_name}-${player.provider_player_name}-${index}`}>
                 <strong>{player.provider_player_name}</strong>
                 <span>{player.provider_team_name} · {player.match_failure}</span>
               </p>

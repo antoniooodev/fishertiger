@@ -15,7 +15,7 @@ test("cached update data keeps OUT, QUESTIONABLE and unresolved rows after failu
         { fantacalcio_id: 1, availability: "OUT" },
         { fantacalcio_id: 2, availability: "QUESTIONABLE" },
       ],
-      unresolved: [{ provider_player_id: 3, provider_player_name: "Unknown", provider_team_name: "Roma", match_failure: "player_ambiguous" }],
+      unresolved: [{ provider_player_name: "Unknown", provider_team_name: "Roma", match_failure: "player_ambiguous" }],
     },
   });
   assert.equal(view.out.length, 1);
@@ -24,8 +24,15 @@ test("cached update data keeps OUT, QUESTIONABLE and unresolved rows after failu
   assert.equal(view.warningMessage, "Cache scaduta conservata. Offline");
 });
 
-test("the unconfigured view names the backend variable and keeps browser input out", () => {
-  const view = injuryUpdateViewModel({ configured: false, warning: "", snapshot: null });
-  assert.equal(view.unconfiguredMessage, "API_FOOTBALL_KEY non configurata nel backend.");
-  assert.doesNotMatch(view.unconfiguredMessage, /incolla|password/i);
+test("the availability view identifies Fantacalcio Online and preserves return details", () => {
+  const player = {
+    fantacalcio_id: 1,
+    availability: "OUT",
+    expected_return: "2026-09-22",
+    return_date_source: "redazione",
+  };
+  const view = injuryUpdateViewModel({ warning: "", snapshot: { players: [player], unresolved: [] } });
+  assert.equal(view.sourceLabel, "Fantacalcio Online");
+  assert.equal(view.out[0].expected_return, "2026-09-22");
+  assert.equal(view.out[0].return_date_source, "redazione");
 });

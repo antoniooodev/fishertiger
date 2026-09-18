@@ -242,7 +242,7 @@ function InjuryManager({
         <div className="injury-manager-note">
           <strong>Overlay informativo</strong>
           <p>
-            I dati automatici arrivano da API-Football. Gli override manuali
+            I dati automatici arrivano da Fantacalcio Online. Gli override manuali
             restano in questo browser e non modificano valori o consigli d&apos;asta.
           </p>
         </div>

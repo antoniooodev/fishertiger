@@ -4,6 +4,7 @@ import {
   effectiveAvailability,
   enrichPlayersWithAvailability,
   normalizeInjuryStatus,
+  shouldRefreshInjuries,
 } from "../src/injury-state.js";
 import { FORCE_AVAILABLE, FORCE_OUT } from "../src/player-injuries.js";
 
@@ -14,7 +15,7 @@ test("automatic state normalization keeps only valid resolved availability", () 
     state: "fresh",
     configured: true,
     cache_age_seconds: 10,
-    snapshot: { players: [automatic, { fantacalcio_id: 8, availability: "SUSPENDED" }], unresolved: [{ provider_player_id: 9 }] },
+    snapshot: { players: [automatic, { fantacalcio_id: 8, availability: "SUSPENDED" }], unresolved: [{ provider_player_name: "Unknown" }] },
   });
   assert.equal(status.snapshot.players.length, 1);
   assert.equal(status.snapshot.unresolved.length, 1);
@@ -40,4 +41,10 @@ test("enrichment is immutable and never creates confirmed_inactive", () => {
   assert.equal(enriched.availability_overlay.effective, "QUESTIONABLE");
   assert.equal("availability_overlay" in original, false);
   assert.equal("confirmed_inactive" in enriched, false);
+});
+
+test("startup and focus refresh only stale or never-checked state", () => {
+  assert.equal(shouldRefreshInjuries({ state: "stale" }), true);
+  assert.equal(shouldRefreshInjuries({ state: "never_checked" }), true);
+  assert.equal(shouldRefreshInjuries({ state: "fresh" }), false);
 });

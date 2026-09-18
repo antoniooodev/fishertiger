@@ -70,7 +70,7 @@ class LocalApiServerTests(unittest.TestCase):
             formations_fetcher=formations_fetcher,
             set_piece_fetcher=set_piece_fetcher,
             player_list_fetcher=player_list_fetcher,
-            injury_api_key="",
+            injury_fetcher=lambda _url: (_ for _ in ()).throw(OSError("offline")),
         )
         self.thread = threading.Thread(target=self.server.serve_forever)
         self.thread.start()
@@ -167,7 +167,7 @@ class LocalApiServerTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertEqual(payload, expected)
 
-    def test_injury_endpoints_are_nonfatal_without_a_server_key(self):
+    def test_injury_endpoints_are_nonfatal_when_remote_is_offline(self):
         saved, _ = self.request(
             "PUT",
             "/api/profiles/my-team",
@@ -179,11 +179,11 @@ class LocalApiServerTests(unittest.TestCase):
         headers = {"Content-Type": "application/json"}
         response, status = self.request("POST", "/api/updates/injuries/status", body, headers)
         self.assertEqual(response.status, 200)
-        self.assertEqual(status["state"], "unconfigured")
+        self.assertEqual(status["state"], "never_checked")
         self.assertIsNone(status["snapshot"])
         response, checked = self.request("POST", "/api/updates/injuries/check", body, headers)
         self.assertEqual(response.status, 200)
-        self.assertEqual(checked["state"], "unconfigured")
+        self.assertEqual(checked["state"], "error")
 
     def test_profile_responses_carry_the_hash_the_dataset_metadata_uses(self):
         """The UI compares meta.profile.profile_hash with the profile's own hash to

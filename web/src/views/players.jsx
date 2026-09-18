@@ -569,7 +569,7 @@ export function PlayerDetail({
           <p style={{ marginTop: 4 }}>
             {player.availability_overlay.automatic?.reason || "Override manuale locale"}
             {player.availability_overlay.automatic
-              ? ` · Fonte API-Football${player.availability_overlay.checkedAt ? ` · aggiornata ${player.availability_overlay.checkedAt.slice(0, 16).replace("T", " ")}` : ""}`
+              ? ` · Rientro ${player.availability_overlay.automatic.expected_return || "non indicato"}${player.availability_overlay.automatic.return_date_source ? ` (${player.availability_overlay.automatic.return_date_source})` : ""} · Fonte Fantacalcio Online${player.availability_overlay.checkedAt ? ` · aggiornata ${player.availability_overlay.checkedAt.slice(0, 16).replace("T", " ")}` : ""}`
               : ""}
           </p>
         </div>

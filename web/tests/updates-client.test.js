@@ -71,7 +71,7 @@ test("uses the SOS Fanta goalkeeper provider endpoint", async () => {
   assert.equal(requestUrl, "/api/updates/sosfanta-goalkeepers/check");
 });
 
-test("keeps API-Football status and refresh behind backend endpoints", async () => {
+test("keeps Fantacalcio Online status and refresh behind backend endpoints", async () => {
   const urls = [];
   const fetchImpl = async (url) => {
     urls.push(url);
@@ -83,7 +83,19 @@ test("keeps API-Football status and refresh behind backend endpoints", async () 
     "/api/updates/injuries/status",
     "/api/updates/injuries/check",
   ]);
-  assert.equal(urls.some((url) => url.includes("api-sports.io")), false);
+  assert.equal(urls.every((url) => url.startsWith("/api/updates/injuries/")), true);
+});
+
+test("manual injury refresh explicitly bypasses the backend freshness guard", async () => {
+  let headers;
+  await checkInjuries({ profile_id: "league" }, {
+    force: true,
+    fetchImpl: async (_url, options) => {
+      headers = options.headers;
+      return { ok: true, status: 200, json: async () => ({ state: "fresh" }) };
+    },
+  });
+  assert.equal(headers["X-Force-Refresh"], "true");
 });
 
 test("maps profile seasons to official Fantacalcio downloads", () => {

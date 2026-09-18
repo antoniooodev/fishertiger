@@ -8,12 +8,11 @@ import {
   withPlayerInjury,
 } from "./player-injuries.js";
 
-const automaticRefreshes = new Set();
 const inFlightRefreshes = new Map();
 
-const sharedCheck = (profile, apiBase, key) => {
+const sharedCheck = (profile, apiBase, key, force = false) => {
   if (!inFlightRefreshes.has(key)) {
-    const request = checkInjuries(profile, { apiBase })
+    const request = checkInjuries(profile, { apiBase, force })
       .finally(() => inFlightRefreshes.delete(key));
     inFlightRefreshes.set(key, request);
   }
@@ -41,6 +40,8 @@ export const normalizeInjuryStatus = (raw) => {
   };
 };
 
+export const shouldRefreshInjuries = (status) => ["stale", "never_checked"].includes(status?.state);
+
 export const effectiveAvailability = (automatic, override) => {
   const normalizedOverride = [FORCE_OUT, FORCE_AVAILABLE].includes(override) ? override : null;
   return {
@@ -51,7 +52,7 @@ export const effectiveAvailability = (automatic, override) => {
       : normalizedOverride === FORCE_AVAILABLE
         ? null
         : automatic?.availability || null,
-    source: normalizedOverride ? "manual" : automatic ? "api-football" : null,
+    source: normalizedOverride ? "manual" : automatic ? "fantacalcio-online" : null,
   };
 };
 
@@ -74,12 +75,10 @@ export const enrichPlayersWithAvailability = (players, status, overrides) => {
 export const injuryUpdateViewModel = (status) => {
   const players = status?.snapshot?.players || [];
   return {
+    sourceLabel: "Fantacalcio Online",
     out: players.filter((player) => player.availability === "OUT"),
     questionable: players.filter((player) => player.availability === "QUESTIONABLE"),
     unresolved: status?.snapshot?.unresolved || [],
-    unconfiguredMessage: status?.configured === false
-      ? "API_FOOTBALL_KEY non configurata nel backend."
-      : "",
     warningMessage: status?.warning
       ? `${status.snapshot ? `${status.fresh ? "Cache" : "Cache scaduta"} conservata. ` : ""}${status.warning}`
       : "",
@@ -102,17 +101,13 @@ export const useInjuryState = ({ profile, apiBase, players }) => {
     setOverrides(loadPlayerInjuries(profileId));
     setStorageWarning("");
     setStatus(normalizeInjuryStatus(null));
-    getInjuryStatus(profile, { apiBase })
-      .then(async (raw) => {
+    const load = async () => {
+      try {
+        const raw = await getInjuryStatus(profile, { apiBase });
         if (!active || token !== request.current) return;
         const cached = normalizeInjuryStatus(raw);
         setStatus(cached);
-        if (
-          cached.configured
-          && ["stale", "never_checked"].includes(cached.state)
-          && !automaticRefreshes.has(refreshKey)
-        ) {
-          automaticRefreshes.add(refreshKey);
+        if (shouldRefreshInjuries(cached)) {
           try {
             const next = normalizeInjuryStatus(await sharedCheck(profile, apiBase, refreshKey));
             if (active && token === request.current) setStatus(next);
@@ -121,17 +116,23 @@ export const useInjuryState = ({ profile, apiBase, players }) => {
               setStatus({ ...cached, state: "error", warning: error?.message || "Aggiornamento non riuscito." });
           }
         }
-      })
-      .catch((error) => {
+      } catch (error) {
         if (active && token === request.current)
           setStatus((current) => ({ ...current, state: "error", warning: error?.message || "Backend non raggiungibile." }));
-      });
-    return () => { active = false; };
+      }
+    };
+    load();
+    const onFocus = () => load();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", onFocus);
+    };
   }, [apiBase, profileId, season]);
 
   const refresh = async () => {
     try {
-      const next = normalizeInjuryStatus(await sharedCheck(profile, apiBase, `${profileId}:${season}`));
+      const next = normalizeInjuryStatus(await sharedCheck(profile, apiBase, `${profileId}:${season}`, true));
       setStatus(next);
       return next;
     } catch (error) {

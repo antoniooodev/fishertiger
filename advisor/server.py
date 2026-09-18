@@ -31,10 +31,10 @@ from .freshness import dataset_configuration_hash, simulation_configuration_hash
 from .league_calendar import build_legacy_calendar_template, preprocess_legacy_calendar
 from .simulation import RosterValidationError
 from .injury_updates import (
-    FetchJson as InjuryFetchJson,
+    FetchPage as InjuryFetchPage,
     InjuryUpdateError,
     check_updates as check_injury_updates,
-    fetch_json as fetch_injury_json,
+    fetch_page as fetch_injury_page,
     stored_status as stored_injury_status,
 )
 from .player_list_updates import (
@@ -135,8 +135,7 @@ class LocalApiServer(ThreadingHTTPServer):
         set_piece_fetcher: FetchPage = fetch_page,
         goalkeeper_fetcher: FetchPage = fetch_page,
         player_list_fetcher: PlayerListFetchPage = fetch_public_page,
-        injury_fetcher: InjuryFetchJson = fetch_injury_json,
-        injury_api_key: str | None = None,
+        injury_fetcher: InjuryFetchPage = fetch_injury_page,
     ) -> None:
         self.profiles_dir = Path(profiles_dir)
         self.datasets_dir = Path(datasets_dir)
@@ -152,7 +151,6 @@ class LocalApiServer(ThreadingHTTPServer):
         self.goalkeeper_fetcher = goalkeeper_fetcher
         self.player_list_fetcher = player_list_fetcher
         self.injury_fetcher = injury_fetcher
-        self.injury_api_key = injury_api_key
         super().__init__(address, LocalApiHandler)
 
     def handle_error(self, request: Any, client_address: Any) -> None:
@@ -658,7 +656,6 @@ class LocalApiHandler(BaseHTTPRequestHandler):
                 self.server.updates_dir,
                 profile.profile_id,
                 profile.season.season,
-                api_key=self.server.injury_api_key,
             )
         except InjuryUpdateError as error:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "snapshot_unavailable", str(error))
@@ -674,7 +671,7 @@ class LocalApiHandler(BaseHTTPRequestHandler):
                 self.server.updates_dir,
                 profile,
                 self.server.injury_fetcher,
-                api_key=self.server.injury_api_key,
+                force=self.headers.get("X-Force-Refresh") == "true",
             )
         except InjuryUpdateError as error:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "injury_update_unavailable", str(error))
@@ -1141,11 +1138,10 @@ def create_server(
     set_piece_fetcher: FetchPage = fetch_page,
     goalkeeper_fetcher: FetchPage = fetch_page,
     player_list_fetcher: PlayerListFetchPage = fetch_public_page,
-    injury_fetcher: InjuryFetchJson = fetch_injury_json,
-    injury_api_key: str | None = None,
+    injury_fetcher: InjuryFetchPage = fetch_injury_page,
 ) -> LocalApiServer:
     """Create a local API server; inject a pipeline generator for tests or embedding."""
-    return LocalApiServer(address, profiles_dir=profiles_dir, datasets_dir=datasets_dir, uploads_dir=uploads_dir, updates_dir=updates_dir, default_profile_path=default_profile_path, generator=generator, simulator=simulator, profile_loader=profile_loader, update_fetcher=update_fetcher, formations_fetcher=formations_fetcher, set_piece_fetcher=set_piece_fetcher, goalkeeper_fetcher=goalkeeper_fetcher, player_list_fetcher=player_list_fetcher, injury_fetcher=injury_fetcher, injury_api_key=injury_api_key)
+    return LocalApiServer(address, profiles_dir=profiles_dir, datasets_dir=datasets_dir, uploads_dir=uploads_dir, updates_dir=updates_dir, default_profile_path=default_profile_path, generator=generator, simulator=simulator, profile_loader=profile_loader, update_fetcher=update_fetcher, formations_fetcher=formations_fetcher, set_piece_fetcher=set_piece_fetcher, goalkeeper_fetcher=goalkeeper_fetcher, player_list_fetcher=player_list_fetcher, injury_fetcher=injury_fetcher)
 
 
 def _simulate_current_dataset(profile: Any, output_dir: Path, iterations: int, seed: int, rosters: dict[str, list[int]] | None = None) -> dict[str, Any]:

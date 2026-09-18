@@ -42,7 +42,7 @@ export const sosFantaGoalkeepersUrl = () =>
 
 const updateRequest = async (provider, action, profile, {
   apiBase = "", fetchImpl = globalThis.fetch, contentHash = "", candidateHash = "",
-  profileHash = "", activeHash = "", startersHash = "", auditHash = "",
+  profileHash = "", activeHash = "", startersHash = "", auditHash = "", force = false,
 } = {}) => {
   if (typeof fetchImpl !== "function")
     throw new UpdateClientError("fetch_unavailable", "Fetch non disponibile.");
@@ -50,7 +50,7 @@ const updateRequest = async (provider, action, profile, {
   try {
     response = await fetchImpl(apiUrl(`/api/updates/${provider}/${action}`, apiBase), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(force ? { "X-Force-Refresh": "true" } : {}) },
       body: JSON.stringify({
         profile,
         content_hash: contentHash,
