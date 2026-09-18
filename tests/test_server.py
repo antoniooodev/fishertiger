@@ -185,6 +185,22 @@ class LocalApiServerTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertEqual(checked["state"], "error")
 
+    def test_fco_p1_status_is_read_only_and_profile_scoped(self):
+        saved, _ = self.request(
+            "PUT", "/api/profiles/my-team", json.dumps(self.profile).encode("utf-8"),
+            {"Content-Type": "application/json"},
+        )
+        self.assertEqual(saved.status, 200)
+        response, status = self.request(
+            "POST", "/api/updates/fco/status", json.dumps({"profile": self.profile}).encode("utf-8"),
+            {"Content-Type": "application/json"},
+        )
+        self.assertEqual(response.status, 200)
+        self.assertEqual(status["provider"], "fantacalcio-online")
+        self.assertIsNone(status["performance"])
+        self.assertIsNone(status["market"])
+        self.assertIsNone(status["lineups"])
+
     def test_profile_responses_carry_the_hash_the_dataset_metadata_uses(self):
         """The UI compares meta.profile.profile_hash with the profile's own hash to
         flag a stale dataset, so the API has to expose it and stay stable when the

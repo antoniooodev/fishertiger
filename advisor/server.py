@@ -37,6 +37,13 @@ from .injury_updates import (
     fetch_page as fetch_injury_page,
     stored_status as stored_injury_status,
 )
+from .fco_intelligence import (
+    FetchPage as FcoFetchPage,
+    FcoIntelligenceError,
+    check_updates as check_fco_intelligence,
+    fetch_page as fetch_fco_page,
+    stored_status as stored_fco_intelligence,
+)
 from .player_list_updates import (
     FetchPage as PlayerListFetchPage,
     PlayerListUpdateError,
@@ -139,6 +146,7 @@ class LocalApiServer(ThreadingHTTPServer):
         goalkeeper_fetcher: FetchPage = fetch_page,
         player_list_fetcher: PlayerListFetchPage = fetch_public_page,
         injury_fetcher: InjuryFetchPage = fetch_injury_page,
+        fco_fetcher: FcoFetchPage = fetch_fco_page,
     ) -> None:
         self.profiles_dir = Path(profiles_dir)
         self.datasets_dir = Path(datasets_dir)
@@ -154,6 +162,7 @@ class LocalApiServer(ThreadingHTTPServer):
         self.goalkeeper_fetcher = goalkeeper_fetcher
         self.player_list_fetcher = player_list_fetcher
         self.injury_fetcher = injury_fetcher
+        self.fco_fetcher = fco_fetcher
         super().__init__(address, LocalApiHandler)
 
     def handle_error(self, request: Any, client_address: Any) -> None:
@@ -205,6 +214,12 @@ class LocalApiHandler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.NOT_FOUND, "not_found", "The requested endpoint does not exist.")
 
     def do_POST(self) -> None:
+        if self._path() == "/api/updates/fco/status":
+            self._fco_status()
+            return
+        if self._path() == "/api/updates/fco/check":
+            self._check_fco_updates()
+            return
         if self._path() == "/api/updates/injuries/status":
             self._injury_status()
             return
@@ -668,6 +683,33 @@ class LocalApiHandler(BaseHTTPRequestHandler):
             )
         except InjuryUpdateError as error:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "snapshot_unavailable", str(error))
+            return
+        self._send_json(HTTPStatus.OK, result)
+
+    def _fco_status(self) -> None:
+        profile = self._injury_request()
+        if profile is None:
+            return
+        try:
+            result = stored_fco_intelligence(self.server.updates_dir, profile)
+        except FcoIntelligenceError as error:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "snapshot_unavailable", str(error))
+            return
+        self._send_json(HTTPStatus.OK, result)
+
+    def _check_fco_updates(self) -> None:
+        profile = self._injury_request()
+        if profile is None:
+            return
+        try:
+            result = check_fco_intelligence(
+                self.server.updates_dir,
+                profile,
+                self.server.fco_fetcher,
+                force=self.headers.get("X-Force-Refresh") == "true",
+            )
+        except FcoIntelligenceError as error:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "fco_update_unavailable", str(error))
             return
         self._send_json(HTTPStatus.OK, result)
 
@@ -1200,9 +1242,10 @@ def create_server(
     goalkeeper_fetcher: FetchPage = fetch_page,
     player_list_fetcher: PlayerListFetchPage = fetch_public_page,
     injury_fetcher: InjuryFetchPage = fetch_injury_page,
+    fco_fetcher: FcoFetchPage = fetch_fco_page,
 ) -> LocalApiServer:
     """Create a local API server; inject a pipeline generator for tests or embedding."""
-    return LocalApiServer(address, profiles_dir=profiles_dir, datasets_dir=datasets_dir, uploads_dir=uploads_dir, updates_dir=updates_dir, default_profile_path=default_profile_path, generator=generator, simulator=simulator, profile_loader=profile_loader, update_fetcher=update_fetcher, formations_fetcher=formations_fetcher, set_piece_fetcher=set_piece_fetcher, goalkeeper_fetcher=goalkeeper_fetcher, player_list_fetcher=player_list_fetcher, injury_fetcher=injury_fetcher)
+    return LocalApiServer(address, profiles_dir=profiles_dir, datasets_dir=datasets_dir, uploads_dir=uploads_dir, updates_dir=updates_dir, default_profile_path=default_profile_path, generator=generator, simulator=simulator, profile_loader=profile_loader, update_fetcher=update_fetcher, formations_fetcher=formations_fetcher, set_piece_fetcher=set_piece_fetcher, goalkeeper_fetcher=goalkeeper_fetcher, player_list_fetcher=player_list_fetcher, injury_fetcher=injury_fetcher, fco_fetcher=fco_fetcher)
 
 
 def _simulate_current_dataset(profile: Any, output_dir: Path, iterations: int, seed: int, rosters: dict[str, list[int]] | None = None) -> dict[str, Any]:

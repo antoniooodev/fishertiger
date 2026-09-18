@@ -28,6 +28,8 @@ import {
   checkSosFantaSetPieces,
   checkSosFantaGoalkeepers,
   checkAllUpdateSources,
+  checkFco,
+  getFcoStatus,
   uploadPlayerListCandidate,
   updateStateLabel,
 } from "./updates-client.js";
@@ -63,7 +65,7 @@ const displayFormationSnapshot = (change, prefix) => {
   return [formation, ...text].filter(Boolean).join("\n\n") || "-";
 };
 
-const HEALTH_LABELS = ["SOS Guida", "SOS Formazioni", "SOS Piazzati", "Listone", "SOS Portieri", "Disponibilità FCO"];
+const HEALTH_LABELS = ["SOS Guida", "SOS Formazioni", "SOS Piazzati", "Listone", "SOS Portieri", "Disponibilità FCO", "FCO Prestazioni", "FCO Mercato", "FCO Probabili"];
 
 function UpdateHealth({ profile, apiBase }) {
   const [rows, setRows] = useState([]);
@@ -78,12 +80,63 @@ function UpdateHealth({ profile, apiBase }) {
           const issues = result?.audit?.summary?.issue_count || 0;
           const records = result?.snapshot?.source_count;
           const unresolved = result?.snapshot?.unresolved?.length;
-          const detail = error || (result ? `${updateStateLabel(result.state)}${issues ? ` · ${issues} problemi locali` : ""}${Number.isFinite(records) ? ` · ${records} record` : ""}${Number.isFinite(unresolved) ? ` · ${unresolved} irrisolti` : ""}` : "Non controllato");
+          const fco = label === "FCO Prestazioni" && result ? `${result.available_matchdays} giornate · ${result.final_matchdays} finali / ${result.provisional_matchdays} provvisorie · ${result.unresolved} irrisolti · ${result.cumulative_audit?.discrepancies?.length || 0} discrepanze`
+            : label === "FCO Mercato" && result ? `${result.market_source_date} · ${result.summary?.players || 0} giocatori · ${result.summary?.current_season_prices || 0} correnti / ${result.summary?.fallback_prices || 0} fallback`
+              : label === "FCO Probabili" && result ? `G${result.matchday} · ${result.active_source_count}/4 fonti · ${result.evaluated_players} valutati · ${result.unresolved?.length || 0} irrisolti` : "";
+          const detail = error || fco || (result ? `${updateStateLabel(result.state)}${issues ? ` · ${issues} problemi locali` : ""}${Number.isFinite(records) ? ` · ${records} record` : ""}${Number.isFinite(unresolved) ? ` · ${unresolved} irrisolti` : ""}` : "Non controllato");
           return <p key={label}><strong>{label}</strong><span>{detail}</span></p>;
         })}
       </div>
     </article>
   );
+}
+
+const fcoDetails = (result) => {
+  const performance = result?.performance;
+  const market = result?.market;
+  const lineups = result?.lineups;
+  return [
+    ["FCO Prestazioni", performance
+      ? `${performance.available_matchdays} giornate · ${performance.final_matchdays} finali / ${performance.provisional_matchdays} provvisorie · ${performance.resolved} risolti / ${performance.unresolved} irrisolti · ${performance.cumulative_audit?.discrepancies?.length || 0} discrepanze cumulative`
+      : "Non ancora disponibili"],
+    ["FCO Mercato", market
+      ? `${market.market_source_date} · ${market.summary?.players || 0} giocatori · ${market.summary?.current_season_prices || 0} prezzi correnti / ${market.summary?.fallback_prices || 0} fallback · ${market.summary?.unresolved || 0} irrisolti`
+      : "Non ancora disponibile"],
+    ["FCO Probabili", lineups
+      ? `G${lineups.matchday} · ${lineups.observation_at?.slice(0, 16).replace("T", " ")} · ${lineups.active_source_count}/4 fonti · ${lineups.evaluated_players} valutati · ${lineups.unresolved?.length || 0} irrisolti`
+      : "Non ancora disponibili"],
+  ];
+};
+
+function FcoUpdates({ profile, apiBase }) {
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  useEffect(() => {
+    let active = true;
+    setResult(null);
+    getFcoStatus(profile, { apiBase }).then((next) => active && setResult(next)).catch(() => {});
+    return () => { active = false; };
+  }, [apiBase, profile?.profile_id, profile?.season?.season]);
+  const check = async () => {
+    setBusy(true);
+    setMessage("");
+    try {
+      const next = await checkFco(profile, { apiBase, force: true });
+      setResult(next);
+      setMessage(Object.keys(next.errors || {}).length ? "Alcune fonti non sono state aggiornate: l'ultimo snapshot valido è rimasto intatto." : "Fonti Fantacalcio Online aggiornate.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Controllo non completato.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <article className="update-source-card">
+    <header><div><h2>Fantacalcio Online</h2></div><span className={`update-state ${result?.state || "idle"}`}>P1</span></header>
+    <div className="update-actions"><button className="update-check-button" onClick={check} disabled={busy}><ActionIcon name="refresh" /><span>{busy ? "Controllo in corso..." : "Aggiorna prestazioni, mercato e probabili"}</span></button></div>
+    <div className="listone-entry-list">{fcoDetails(result).map(([label, detail]) => <p key={label}><strong>{label}</strong><span>{detail}</span></p>)}</div>
+    {message && <p className="update-message" role="status">{message}</p>}
+  </article>;
 }
 
 function PlayerListUpdates({ profile, apiBase, onApplyStart, onApplied }) {
@@ -897,6 +950,8 @@ export function Updates({
       </div>
 
       <UpdateHealth profile={profile} apiBase={apiBase} />
+
+      <FcoUpdates profile={profile} apiBase={apiBase} />
 
       <div className="update-workflow" aria-label="Come usare gli aggiornamenti">
         <strong>Come funziona</strong>

@@ -795,6 +795,8 @@ function App() {
               selected={selectedPlayer}
               setSelected={setSelectedPlayer}
               initialRole={listRole}
+              profile={profile}
+              apiBase={apiBase}
             />
           ) : null}
           {view === "teams" ? (

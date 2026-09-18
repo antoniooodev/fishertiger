@@ -123,6 +123,8 @@ export const applyPlayerList = (profile, candidateHash, profileHash, activeHash,
   updateRequest("player-list", "apply", profile, { ...options, candidateHash, profileHash, activeHash, startersHash });
 export const getInjuryStatus = (profile, options) => updateRequest("injuries", "status", profile, options);
 export const checkInjuries = (profile, options) => updateRequest("injuries", "check", profile, options);
+export const getFcoStatus = (profile, options) => updateRequest("fco", "status", profile, options);
+export const checkFco = (profile, options) => updateRequest("fco", "check", profile, options);
 
 export const checkAllUpdateSources = async (profile, options = {}) => {
   const sources = [
@@ -131,7 +133,19 @@ export const checkAllUpdateSources = async (profile, options = {}) => {
     ["SOS Portieri", checkSosFantaGoalkeepers], ["Disponibilità FCO", checkInjuries],
   ];
   const settled = await Promise.allSettled(sources.map(([, check]) => check(profile, options)));
-  return sources.map(([label], index) => ({ label, ...(settled[index].status === "fulfilled" ? { result: settled[index].value } : { error: settled[index].reason?.message || "Controllo non riuscito" }) }));
+  const rows = sources.map(([label], index) => ({ label, ...(settled[index].status === "fulfilled" ? { result: settled[index].value } : { error: settled[index].reason?.message || "Controllo non riuscito" }) }));
+  try {
+    const result = await checkFco(profile, options);
+    rows.push(
+      { label: "FCO Prestazioni", result: result.performance, error: result.errors?.performance },
+      { label: "FCO Mercato", result: result.market, error: result.errors?.market },
+      { label: "FCO Probabili", result: result.lineups, error: result.errors?.lineups },
+    );
+  } catch (error) {
+    for (const label of ["FCO Prestazioni", "FCO Mercato", "FCO Probabili"])
+      rows.push({ label, error: error?.message || "Controllo non riuscito" });
+  }
+  return rows;
 };
 
 export const uploadPlayerListCandidate = async (file, profile, { apiBase = "", fetchImpl = globalThis.fetch } = {}) => {

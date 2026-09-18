@@ -31,6 +31,8 @@ import {
   teamLogoUrl,
   writeMediaPreference,
 } from "../player-media.js";
+import { getFcoStatus } from "../updates-client.js";
+import { appearanceLabel, p1PlayerViewModel, voteLabel } from "../player-intelligence.js";
 import {
   Empty,
   PlayerRow,
@@ -110,6 +112,8 @@ export default function PlayersView({
   selected,
   setSelected,
   initialRole,
+  profile,
+  apiBase = "",
 }) {
   const teamValues = useMemo(
     () => ["TUTTE", ...data.teams.map((item) => item.squadra)],
@@ -133,9 +137,17 @@ export default function PlayersView({
   const [assignOwner, setAssignOwner] = useState(0);
   const [assignPrice, setAssignPrice] = useState("");
   const [feedback, setFeedback] = useState(null);
+  const [p1, setP1] = useState(null);
   const [priceFocusToken, setPriceFocusToken] = useState(0);
   const isDesktop = useMediaQuery("(min-width: 1000px)");
   const { query, role, team, onlyTargets, showLive } = filters;
+
+  useEffect(() => {
+    let active = true;
+    setP1(null);
+    if (profile) getFcoStatus(profile, { apiBase }).then((value) => active && setP1(value)).catch(() => {});
+    return () => { active = false; };
+  }, [apiBase, profile?.profile_id, profile?.season?.season]);
 
   useEffect(() => {
     setFilters(loadPlayerFilters(profileId, ROLE_VALUES, teamValues));
@@ -256,6 +268,7 @@ export default function PlayersView({
       mark={mark}
       showMedia={showMedia}
       noteMaxLength={NOTE_MAX_LENGTH}
+      intelligence={p1PlayerViewModel(p1, player.id)}
       onToggleTarget={() =>
         updateNotes(withTarget(notes, player.id, !mark.target))
       }
@@ -520,6 +533,7 @@ export function PlayerDetail({
   auction,
   onToggleTarget,
   onNoteChange,
+  intelligence,
 }) {
   const history = Object.entries(player.storico || {});
   const outliers = valuation.outliersFor(player);
@@ -645,6 +659,8 @@ export function PlayerDetail({
         </span>
       </div>
 
+      <PlayerIntelligence intelligence={intelligence} />
+
       <div>
         <div className="section-head">
           <h2 style={{ fontSize: "var(--fs-md)" }}>Storico</h2>
@@ -688,6 +704,41 @@ export function PlayerDetail({
       </p>
     </div>
   );
+}
+
+export function PlayerIntelligence({ intelligence }) {
+  const performance = intelligence?.performance || [];
+  const market = intelligence?.market;
+  const lineup = intelligence?.lineup;
+  const price = market?.market_price;
+  const sources = [["FC", lineup?.fc_pct], ["Gaz", lineup?.gaz_pct], ["SOS", lineup?.sos_pct], ["Sky", lineup?.sky_pct]];
+  return <div className="p1-intelligence">
+    <section>
+      <div className="section-head"><h2>Rendimento</h2>{Number.isFinite(intelligence?.averageFc) && <span>MV FC {intelligence.averageFc.toFixed(2)}</span>}</div>
+      {performance.length ? <div className="p1-performance">{performance.map((row) => <p key={row.matchday}>
+        <b>G{row.matchday}</b><strong>{voteLabel(row.vote_fc)}</strong><span>{row.venue === "HOME" ? "vs" : "@"} {row.opponent}</span><small>{appearanceLabel(row)}{row.goals ? ` · ⚽ ${row.goals}` : ""}{row.assists ? ` · A ${row.assists}` : ""}{row.yellow_cards ? " · 🟨" : ""}{row.red_cards ? " · 🟥" : ""}</small>
+      </p>)}</div> : <p className="micro">Prestazioni correnti non ancora disponibili.</p>}
+    </section>
+    <section>
+      <div className="section-head"><h2>Mercato</h2></div>
+      {market ? <dl className="p1-facts">
+        <dt>Comprato da</dt><dd>{Number.isFinite(market.ownership_pct) ? `${market.ownership_pct.toFixed(1)}%` : "campione insufficiente"}</dd>
+        <dt>7 giorni</dt><dd>{Number.isFinite(market.ownership_delta_7d) ? `${market.ownership_delta_7d >= 0 ? "+" : ""}${market.ownership_delta_7d.toFixed(1)} pp` : "—"}</dd>
+        <dt>Prezzo mercato</dt><dd>{Number.isFinite(price?.value) ? price.value.toFixed(2) : market.new_player ? "Nuovo" : "—"}</dd>
+        <dt>Campione</dt><dd>{market.market_price_cohort?.teams} squadre / {market.market_price_cohort?.credits}</dd>
+        <dt>Stagione prezzo</dt><dd>{price?.fallback_previous_season ? "Prezzo 2025/26" : price?.current_season ? price.price_season : "Non disponibile"}</dd>
+        <dt>Fonte</dt><dd>{market.market_source_date}</dd>
+      </dl> : <p className="micro">Mercato non ancora disponibile.</p>}
+    </section>
+    <section>
+      <div className="section-head"><h2>Prossima giornata</h2></div>
+      {lineup ? <>
+        <p className="p1-lineup-head"><b>{lineup.opponent} · {lineup.venue === "HOME" ? "casa" : "trasferta"}</b><strong>{Number.isFinite(lineup.weighted_pct) ? `${lineup.weighted_pct}%` : "—"}</strong></p>
+        <div className="p1-sources">{sources.map(([label, value]) => <span key={label}><small>{label}</small><b>{Number.isFinite(value) ? value : "—"}</b></span>)}</div>
+        <p className="micro">{lineup.source_count}/4 fonti · rilevazione {lineup.observation_at?.slice(0, 16).replace("T", " ")}</p>
+      </> : <p className="micro">Probabilità prossima giornata non ancora disponibile.</p>}
+    </section>
+  </div>;
 }
 
 function LiveAuctionPanel({

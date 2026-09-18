@@ -1,0 +1,615 @@
+"""Authorized Fantacalcio Online P1 snapshots: performances, market and lineups."""
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import tempfile
+from collections import defaultdict
+from collections.abc import Callable
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+
+from bs4 import BeautifulSoup
+
+from .player_identity import load_identity_overrides, normalize, resolve_player
+from .player_list_updates import active_player_list_path, read_player_list, season_years
+
+PROVIDER = "fantacalcio-online"
+BASE = "https://www.fantacalcio-online.com/it"
+MAX_RESPONSE_BYTES = 5_000_000
+TTL_SECONDS = 4 * 60 * 60
+FetchPage = Callable[[str], str]
+
+
+class FcoIntelligenceError(ValueError):
+    """A remote page or stored P1 snapshot failed semantic validation."""
+
+
+def _text(node: object) -> str:
+    return re.sub(r"\s+", " ", node.get_text(" ", strip=True)).strip() if hasattr(node, "get_text") else ""
+
+
+def _slug(season: str) -> str:
+    start, end = season_years(season)
+    return f"{start}-{end}"
+
+
+def performance_url(season: str, matchday: int | str) -> str:
+    return f"{BASE}/serie-a/{_slug(season)}/voti/{matchday}-giornata"
+
+
+def lineup_url(season: str, matchday: int) -> str:
+    return f"{BASE}/serie-a/{_slug(season)}/probabili-formazioni/{matchday}-giornata"
+
+
+CUMULATIVE_URL = f"{BASE}/serie-a/{{season}}/statistiche-bonus-malus"
+OWNERSHIP_URL = f"{BASE}/i-piu-comprati"
+PRICE_URL = f"{BASE}/asta-fantacalcio-stima-prezzi"
+
+
+def fetch_page(url: str) -> str:
+    request = Request(url, headers={"User-Agent": "Fishertiger/1.0", "Accept": "text/html,application/xhtml+xml"})
+    try:
+        with urlopen(request, timeout=20) as response:
+            if response.status != 200:
+                raise FcoIntelligenceError(f"Fantacalcio Online returned HTTP {response.status}.")
+            payload = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(payload) > MAX_RESPONSE_BYTES:
+                raise FcoIntelligenceError("Fantacalcio Online returned an unexpectedly large response.")
+            charset = response.headers.get_content_charset() or "utf-8"
+        return payload.decode(charset)
+    except FcoIntelligenceError:
+        raise
+    except Exception as error:
+        raise FcoIntelligenceError("Fantacalcio Online could not be reached or returned invalid HTML.") from error
+
+
+def _dataset(soup: BeautifulSoup, expected_name: str) -> dict[str, object]:
+    for script in soup.select('script[type="application/ld+json"]'):
+        try:
+            value = json.loads(script.string or "")
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict) and value.get("@type") == "Dataset" and expected_name.lower() in str(value.get("name", "")).lower():
+            return value
+    raise FcoIntelligenceError(f"Fantacalcio Online {expected_name} dataset metadata is missing.")
+
+
+def _season_round(soup: BeautifulSoup, season: str, matchday: int, kind: str) -> dict[str, object]:
+    try:
+        data = _dataset(soup, kind)
+    except FcoIntelligenceError:
+        if kind != "Voti Fantacalcio":
+            raise
+        data = {"name": _text(soup.select_one("title"))}
+    start, end = season_years(season)
+    name = str(data.get("name", ""))
+    found_round = re.search(r"(\d+)[ªa]? giornata", name, re.I)
+    found_season = re.search(r"(\d{4})/(\d{4})", name)
+    if not found_round or not found_season or int(found_round.group(1)) != matchday or (int(found_season.group(1)), int(found_season.group(2))) != (start, end):
+        raise FcoIntelligenceError(f"Fantacalcio Online {kind} page season or matchday does not match the request.")
+    return data
+
+
+def _number(value: str, *, percentage: bool = False) -> float | None:
+    clean = value.strip().replace("%", "").replace(",", ".")
+    if not clean or clean in {"–", "-", "—"}:
+        return None
+    if not re.fullmatch(r"[+-]?\d+(?:\.\d+)?", clean):
+        raise FcoIntelligenceError(f"Malformed {'percentage' if percentage else 'number'}: {value!r}.")
+    result = float(clean)
+    if percentage and not 0 <= result <= 100:
+        raise FcoIntelligenceError(f"Percentage outside 0-100: {value!r}.")
+    return result
+
+
+def _vote(value: str) -> dict[str, object]:
+    clean = value.strip().lower()
+    if clean in {"s.v.", "s.v", "sv"}:
+        return {"state": "sv", "value": None}
+    if clean in {"–", "-", "—", ""}:
+        return {"state": "unpublished", "value": None}
+    number = _number(clean)
+    if number is None or not 0 <= number <= 10:
+        raise FcoIntelligenceError(f"Invalid editorial vote: {value!r}.")
+    return {"state": "numeric", "value": number}
+
+
+def _fixture(header: object) -> dict[str, object]:
+    teams = [_text(item) for item in header.select(".prb-incontro__nome")]
+    if len(teams) != 2 or teams[0] == teams[1]:
+        raise FcoIntelligenceError("A matchday fixture has invalid teams.")
+    score = _text(header.select_one(".prb-incontro__punteggio"))
+    scores = re.fullmatch(r"(\d+)\s*:\s*(\d+)", score)
+    kickoff = _text(header.select_one(".prb-incontro__data"))
+    try:
+        kickoff_iso = datetime.strptime(kickoff, "%d/%m/%Y %H:%M").isoformat()
+    except ValueError as error:
+        raise FcoIntelligenceError("A matchday fixture has an invalid kickoff.") from error
+    return {
+        "home_team": teams[0], "away_team": teams[1], "kickoff": kickoff_iso,
+        "status": _text(header.select_one(".prb-incontro__stato")),
+        "home_score": int(scores.group(1)) if scores else None,
+        "away_score": int(scores.group(2)) if scores else None,
+    }
+
+
+EVENT_PATTERNS = {
+    "goals": re.compile(r"(\d+) Goal Segnat", re.I),
+    "assists": re.compile(r"(\d+) Assist", re.I),
+    "yellow_cards": re.compile(r"Ammonizione", re.I),
+    "red_cards": re.compile(r"Espulsione", re.I),
+    "penalties_scored": re.compile(r"(\d+) (?:Rigore|Goal) Segnat[oi] su Rigore", re.I),
+    "penalties_missed": re.compile(r"(\d+) Rigori? Sbagliat", re.I),
+    "own_goals": re.compile(r"(\d+) Autogol", re.I),
+    "goals_conceded": re.compile(r"(\d+) Goal Subit", re.I),
+    "penalties_saved": re.compile(r"(\d+) Rigori? Parat", re.I),
+}
+
+
+def _event_titles(node: object) -> list[str]:
+    return [str(item.get("data-original-title") or item.get("title") or "").strip() for item in node.select("[data-original-title], [title]")]
+
+
+def _event_value(titles: list[str], pattern: re.Pattern[str], supported: bool) -> int | None:
+    if not supported:
+        return None
+    total = 0
+    for title in titles:
+        match = pattern.search(title)
+        if match:
+            total += int(match.group(1)) if match.lastindex else 1
+    return total
+
+
+def parse_performance(html: str, season: str, matchday: int) -> dict[str, object]:
+    """Parse one round page without network or identity side effects."""
+    soup = BeautifulSoup(html, "html.parser")
+    _season_round(soup, season, matchday, "Voti Fantacalcio")
+    panes = [pane for pane in soup.select(".tab-pane") if pane.select_one(".prb-incontro")]
+    if len(panes) != 10:
+        raise FcoIntelligenceError(f"Expected 10 fixtures, found {len(panes)}.")
+    all_titles = _event_titles(soup)
+    supported = {key: any(pattern.search(title) for title in all_titles) for key, pattern in EVENT_PATTERNS.items()}
+    fixtures, records = [], []
+    fixture_keys: set[tuple[str, str]] = set()
+    for pane in panes:
+        fixture = _fixture(pane.select_one(".prb-incontro"))
+        key = (fixture["home_team"], fixture["away_team"])
+        if key in fixture_keys:
+            raise FcoIntelligenceError("Duplicate fixture in matchday page.")
+        fixture_keys.add(key)
+        fixtures.append(fixture)
+        sections = pane.select(".prb-squadra")
+        if len(sections) != 2:
+            raise FcoIntelligenceError("A fixture does not contain exactly two team sections.")
+        for section in sections:
+            team = _text(section.select_one(".prb-squadra__nome"))
+            if team not in key:
+                raise FcoIntelligenceError("A fixture player table has an unexpected team.")
+            opponent = fixture["away_team"] if team == fixture["home_team"] else fixture["home_team"]
+            venue = "HOME" if team == fixture["home_team"] else "AWAY"
+            tables = section.select("table")
+            captions = [normalize(_text(table.select_one("caption"))) for table in tables]
+            if not any("scesi in campo" in value for value in captions) or not any("in panchina" in value for value in captions):
+                raise FcoIntelligenceError("A performance team is missing a semantic player table.")
+            for table, caption in zip(tables, captions):
+                played_table = "scesi in campo" in caption
+                bench_table = "in panchina" in caption
+                if not (played_table or bench_table):
+                    continue
+                headers = [_text(item).upper() for item in table.select("thead th")]
+                if headers[-3:] != ["FC", "ROM", "TOR"]:
+                    raise FcoIntelligenceError("Performance editorial columns changed.")
+                for row in table.select("tbody tr"):
+                    name = _text(row.select_one(".prb-nome"))
+                    cells = row.select("td")
+                    if not name or len(cells) != 3:
+                        raise FcoIntelligenceError("Malformed performance player row.")
+                    titles = _event_titles(row)
+                    did_not_enter = any("mai entrato" in title.lower() for title in titles) or "non entrato" in _text(row).lower()
+                    entered = any("entrato dalla panchina" in title.lower() for title in titles) or "subentrato" in _text(row).lower()
+                    sub = next((re.search(r"Sostituito dopo (\d+)", title, re.I) for title in titles if "sostituito" in title.lower()), None)
+                    entry = next((re.search(r"Entrato dalla panchina.*?(\d+) minuti", title, re.I) for title in titles if "entrato dalla" in title.lower()), None)
+                    record = {
+                        "provider_name": name, "provider_team": team, "provider_role": _text(row.select_one(".role")), "matchday": matchday,
+                        "opponent": opponent, "venue": venue, "started": played_table,
+                        "entered_from_bench": bool(entered), "did_not_enter": bool(did_not_enter),
+                        "substitution_minute": int(sub.group(1)) if sub else None,
+                        "entry_minute": None,
+                        "minutes_played": int(entry.group(1)) if entry else int(sub.group(1)) if sub else 90 if played_table else 0 if did_not_enter else None,
+                        "vote_fc": _vote(_text(cells[0])), "vote_roma": _vote(_text(cells[1])), "vote_torino": _vote(_text(cells[2])),
+                    }
+                    record.update({event: _event_value(titles, pattern, supported[event]) for event, pattern in EVENT_PATTERNS.items()})
+                    if record["provider_role"] != "P":
+                        record["goals_conceded"] = None
+                        record["penalties_saved"] = None
+                    records.append(record)
+    if len({(row["provider_team"], normalize(row["provider_name"])) for row in records}) != len(records):
+        raise FcoIntelligenceError("Duplicate player in matchday page.")
+    complete = all(fixture["status"].lower() == "terminata" for fixture in fixtures)
+    published = all(row[key]["state"] != "unpublished" for row in records if not row["did_not_enter"] for key in ("vote_fc", "vote_roma", "vote_torino"))
+    return {"fixtures": fixtures, "records": records, "state": "final" if complete and published else "provisional", "event_availability": supported}
+
+
+def _market_table(soup: BeautifulSoup, table_id: str, headers: list[str]) -> object:
+    table = soup.select_one(f"#{table_id}")
+    actual = [_text(item) for item in table.select("thead th")] if table else []
+    if table is None or actual != headers:
+        raise FcoIntelligenceError("Fantacalcio Online market table semantics changed.")
+    return table
+
+
+OWNERSHIP_HEADERS = ["Ruolo", "Squadra", "Nome", "Kap.", "Comprato da", "Prezzo 350", "Prezzo 500", "Titolare", "7 gg"]
+
+
+def parse_ownership(html: str, season: str, cohort: str) -> dict[str, object]:
+    soup = BeautifulSoup(html, "html.parser")
+    data = _dataset(soup, "giocatori più comprati")
+    start, end = season_years(season)
+    title = _text(soup.select_one("h1"))
+    if f"{start}/{end}" not in title:
+        raise FcoIntelligenceError("Ownership page season does not match the active profile.")
+    expected = {"overall": "", "lte9": "piccole", "gte10": "grandi"}.get(cohort)
+    role = soup.select_one('select[name="ruoli"] option[selected]')
+    league = soup.select_one('select[name="leghe"] option[selected]')
+    if expected is None or role is None or role.get("value") != "fcit" or (league.get("value") if league else "") != expected:
+        raise FcoIntelligenceError("Ownership filter response does not match the verified cohort request.")
+    intro = next((_text(item) for item in soup.select(".fco-tagli__intro") if "aggiornato al" in _text(item).lower()), "")
+    found = re.search(r"aggiornato al (\d{2}/\d{2}/\d{4}): (\d+) calciatori", intro, re.I)
+    if not found:
+        raise FcoIntelligenceError("Ownership source date or row count is missing.")
+    source_date = datetime.strptime(found.group(1), "%d/%m/%Y").date().isoformat()
+    contract = normalize(_text(soup))
+    if data.get("dateModified") != source_date or "piu di 10 giocatori" not in normalize(data.get("measurementTechnique", "")) or "da 30 squadre in su" not in contract or "ogni notte" not in contract:
+        raise FcoIntelligenceError("Ownership eligibility or refresh semantics changed.")
+    table = _market_table(soup, "piu_comprati", OWNERSHIP_HEADERS)
+    rows = []
+    for row in table.select("tbody tr"):
+        cells = row.select("td")
+        if len(cells) != 9:
+            raise FcoIntelligenceError("Malformed ownership row.")
+        ownership = _number(_text(cells[4]), percentage=True)
+        delta = _number(_text(cells[8]))
+        rows.append({"provider_name": _text(cells[2]), "provider_team": _text(cells[1]), "quotation": int(_number(_text(cells[3])) or 0), "ownership_pct": ownership, "ownership_delta_7d": delta})
+    if len(rows) != int(found.group(2)) or len({(normalize(row["provider_name"]), normalize(row["provider_team"])) for row in rows}) != len(rows):
+        raise FcoIntelligenceError("Ownership declared count or identities do not match the table.")
+    return {"source_date": source_date, "cohort": cohort, "rows": rows}
+
+
+PRICE_HEADERS = ["Ruolo", "Squadra", "Nome", "Kap.", "8 sq. / 350", "10 sq. / 350", "8 sq. / 500", "10 sq. / 500", "M.V.", "Pres."]
+PRICE_FIELDS = ("price_8_350", "price_10_350", "price_8_500", "price_10_500")
+
+
+def parse_prices(html: str, season: str) -> dict[str, object]:
+    soup = BeautifulSoup(html, "html.parser")
+    data = _dataset(soup, "Prezzi medi d'asta")
+    source_date = str(data.get("dateModified", ""))
+    try:
+        datetime.strptime(source_date, "%Y-%m-%d")
+    except ValueError as error:
+        raise FcoIntelligenceError("Market price source date is invalid.") from error
+    technique = str(data.get("measurementTechnique", ""))
+    if "soglia minima di 3 aste" not in technique.lower():
+        raise FcoIntelligenceError("Market price page does not state the current three-auction threshold.")
+    table = _market_table(soup, "players_list", PRICE_HEADERS)
+    rows = []
+    for row in table.select("tbody tr"):
+        cells = row.select("td")
+        if len(cells) != 10:
+            raise FcoIntelligenceError("Malformed market price row.")
+        badge = _text(cells[2].select_one(".fco-etichetta"))
+        fallback = "2025/2026" in badge
+        new = "nuovo" in badge.lower()
+        values = [_number(_text(cell)) for cell in cells[4:8]]
+        if new and any(value is not None for value in values):
+            raise FcoIntelligenceError("A Nuovo market row unexpectedly contains historical prices.")
+        prices = {}
+        for field, value in zip(PRICE_FIELDS, values):
+            prices[field] = {"value": value, "price_season": "2025/26" if fallback else season, "current_season": value is not None and not fallback, "fallback_previous_season": value is not None and fallback, "unavailable": value is None}
+        rows.append({"provider_name": _text(cells[2].select_one(".text-bold")) + (f" {_text(cells[2].select_one('.text-muted'))}" if cells[2].select_one(".text-muted") else ""), "provider_team": _text(cells[1]), "quotation": int(_number(_text(cells[3])) or 0), "new_player": new, **prices})
+    declared = int(data.get("size", {}).get("value", -1)) if isinstance(data.get("size"), dict) else -1
+    if len(rows) != declared:
+        raise FcoIntelligenceError("Market price declared count does not match the table.")
+    return {"source_date": source_date, "minimum_auctions": 3, "rows": rows}
+
+
+def parse_lineups(html: str, season: str, matchday: int) -> dict[str, object]:
+    soup = BeautifulSoup(html, "html.parser")
+    data = _season_round(soup, season, matchday, "Probabili formazioni")
+    page = _text(soup)
+    observed = re.search(r"Ultima rilevazione:\s*(.+?)\.\s*Per questa giornata hanno pubblicato\s*(\d+) redazioni su 4.*?totale di\s*(\d+) calciatori", page, re.I)
+    if not observed:
+        raise FcoIntelligenceError("Probable-lineup observation summary is missing.")
+    try:
+        observation = datetime.fromisoformat(str(data.get("dateModified", ""))).isoformat()
+    except ValueError as error:
+        raise FcoIntelligenceError("Probable-lineup observation timestamp is invalid.") from error
+    source_count, evaluated = int(observed.group(2)), int(observed.group(3))
+    panes = [pane for pane in soup.select(".tab-pane") if pane.select_one(".prb-incontro")]
+    if len(panes) != 10:
+        raise FcoIntelligenceError(f"Expected 10 probable-lineup fixtures, found {len(panes)}.")
+    fixtures, rows = [], []
+    for pane in panes:
+        fixture = _fixture(pane.select_one(".prb-incontro"))
+        fixtures.append(fixture)
+        for section in pane.select(".prb-squadra"):
+            team = _text(section.select_one(".prb-squadra__nome"))
+            venue = "HOME" if team == fixture["home_team"] else "AWAY"
+            opponent = fixture["away_team"] if venue == "HOME" else fixture["home_team"]
+            for table in section.select("table"):
+                caption = normalize(_text(table.select_one("caption")))
+                if "probabili titolari" in caption:
+                    group = "probable_starter"
+                elif "probabile panchina" in caption:
+                    group = "probable_bench"
+                elif "indisponibili" in caption:
+                    group = "unavailable"
+                else:
+                    continue
+                headers = [_text(item) for item in table.select("thead th")]
+                if headers[1:6] != ["Fc", "Gaz", "SOS", "Sky", "Media*"]:
+                    raise FcoIntelligenceError("Probable-lineup source columns changed.")
+                for row in table.select("tbody tr"):
+                    name = _text(row.select_one(".prb-nome"))
+                    cells = row.select("td")
+                    if not name or len(cells) < 5:
+                        raise FcoIntelligenceError("Malformed probable-lineup player row.")
+                    values = [_number(_text(cell), percentage=True) for cell in cells[:5]]
+                    rows.append({"provider_name": name, "provider_team": team, "matchday": matchday, "opponent": opponent, "venue": venue, "section": group, "fc_pct": values[0], "gaz_pct": values[1], "sos_pct": values[2], "sky_pct": values[3], "weighted_pct": values[4], "source_count": sum(value is not None for value in values[:4]), "observation_at": observation, "official_confirmed": "confermato" in _text(cells[5]).lower() if len(cells) > 5 else None})
+            unavailable = section.select_one(".prb-fuori")
+            if unavailable is not None and "indisponibili" not in normalize(_text(unavailable.select_one(".prb-fuori__titolo"))):
+                raise FcoIntelligenceError("Probable-lineup unavailable section changed.")
+            for row in unavailable.select(".prb-fuori__riga") if unavailable else ():
+                name = _text(row.select_one(".prb-nome"))
+                if not name:
+                    raise FcoIntelligenceError("Malformed unavailable player row.")
+                rows.append({"provider_name": name, "provider_team": team, "matchday": matchday, "opponent": opponent, "venue": venue, "section": "unavailable", "fc_pct": None, "gaz_pct": None, "sos_pct": None, "sky_pct": None, "weighted_pct": None, "source_count": 0, "observation_at": observation, "official_confirmed": None})
+    if len({(normalize(row["provider_name"]), normalize(row["provider_team"])) for row in rows}) != len(rows) or len({row["provider_team"] for row in rows}) != 20 or len(rows) != evaluated:
+        raise FcoIntelligenceError("Probable-lineup teams, identities or evaluated count do not match the page.")
+    return {"matchday": matchday, "observation_at": observation, "active_source_count": source_count, "evaluated_players": evaluated, "fixtures": fixtures, "rows": rows}
+
+
+def parse_cumulative(html: str, season: str) -> list[dict[str, object]]:
+    soup = BeautifulSoup(html, "html.parser")
+    start, end = season_years(season)
+    if f"{start}/{end}" not in " ".join(_text(item) for item in soup.select("h1, .fco-occhiello")):
+        raise FcoIntelligenceError("Cumulative bonus/malus season does not match the active profile.")
+    headers = ["RT", "Squadra", "Nome", "Kap.", "PR", "MV5", "FM5", "", "GR+", "GR-", "RG+", "A+", "AF+", "PD+", "P/T", "EG-", "ET-", "RC-"]
+    table = next((item for item in soup.select("table") if [_text(cell) for cell in item.select("thead th")] == headers), None)
+    if table is None:
+        raise FcoIntelligenceError("Cumulative bonus/malus semantic table is missing.")
+    result = []
+    for row in table.select("tbody tr"):
+        cells = row.select("td")
+        if len(cells) != len(headers):
+            raise FcoIntelligenceError("Malformed cumulative bonus/malus row.")
+        result.append({"provider_name": _text(cells[2]), "provider_team": _text(cells[1]), "penalties_scored": _number(_text(cells[8])), "penalties_missed": _number(_text(cells[9])), "assists": sum(_number(_text(cells[index])) or 0 for index in (11, 12))})
+    return result
+
+
+def _active_players(profile: object) -> list[dict[str, object]]:
+    players, departed = read_player_list(active_player_list_path(profile))
+    active = players.loc[~players["Id"].isin(set(departed["Id"]))]
+    return [{"Id": int(row.Id), "R": str(row.R), "Nome": str(row.Nome), "Squadra": str(row.Squadra)} for row in active.itertuples()]
+
+
+def _resolve(rows: list[dict[str, object]], players: list[dict[str, object]]) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    resolved, unresolved = [], []
+    overrides = load_identity_overrides()
+    for row in rows:
+        match = resolve_player(row["provider_name"], row["provider_team"], players, source=PROVIDER, overrides=overrides)
+        identity = {"source": PROVIDER, "raw_source_player_name": row["provider_name"], "raw_source_team": row["provider_team"]}
+        if not match["matched"] or match.get("method") == "fuzzy_unique":
+            unresolved.append({**row, **identity, "unresolved_diagnostic": "fuzzy_only_not_accepted" if match.get("method") == "fuzzy_unique" else match["reason"], "matching_method": match.get("method"), "details": {key: value for key, value in match.items() if key not in {"matched", "player"}}})
+            continue
+        player = match["player"]
+        resolved.append({**row, "fantacalcio_id": int(player["Id"]), "canonical_name": str(player["Nome"]), "canonical_team": str(player["Squadra"]), "matching_method": match["method"], **identity})
+    return resolved, unresolved
+
+
+def _directory(root: Path, profile: object, name: str) -> Path:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", profile.profile_id):
+        raise FcoIntelligenceError("The profile ID is invalid.")
+    start, end = season_years(profile.season.season)
+    return root / profile.profile_id / f"{start}-{str(end)[-2:]}" / name
+
+
+def _write(path: Path, value: object, *, immutable: bool = False) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    if immutable and path.exists():
+        if path.read_text(encoding="utf-8") != encoded:
+            raise FcoIntelligenceError(f"Immutable snapshot {path.name} already exists with different content.")
+        return
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+        handle.write(encoded)
+        temporary = Path(handle.name)
+    temporary.replace(path)
+
+
+def _read(path: Path) -> dict[str, object] | None:
+    if not path.exists():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise FcoIntelligenceError(f"Stored P1 snapshot {path.name} is invalid.") from error
+    if not isinstance(value, dict):
+        raise FcoIntelligenceError(f"Stored P1 snapshot {path.name} is invalid.")
+    return value
+
+
+def _hash(value: object) -> str:
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _status(root: Path, profile: object) -> dict[str, object]:
+    performance = _read(_directory(root, profile, "performance-v1") / "index.json")
+    market = _read(_directory(root, profile, "market-v1") / "latest.json")
+    lineups = _read(_directory(root, profile, "lineup-probability-v1") / "latest.json")
+    return {"schema_version": "1.0", "provider": PROVIDER, "season": profile.season.season, "performance": performance, "market": market, "lineups": lineups}
+
+
+def stored_status(root: Path, profile: object) -> dict[str, object]:
+    return _status(root, profile)
+
+
+def _fresh(snapshot: object, now: datetime) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    try:
+        checked = datetime.fromisoformat(str(snapshot["checked_at"]).replace("Z", "+00:00"))
+        if checked.tzinfo is None:
+            checked = checked.replace(tzinfo=timezone.utc)
+        return (now - checked.astimezone(timezone.utc)).total_seconds() < TTL_SECONDS
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def _store_performance(root: Path, profile: object, parsed: dict[str, object], matchday: int, checked_at: str, players: list[dict[str, object]]) -> dict[str, object]:
+    directory = _directory(root, profile, "performance-v1")
+    path = directory / "matchdays" / f"{matchday:02}.json"
+    previous = _read(path)
+    resolved, unresolved = _resolve(parsed["records"], players)
+    content = {"fixtures": parsed["fixtures"], "players": resolved, "unresolved": unresolved, "event_availability": parsed["event_availability"]}
+    source_hash = _hash(content)
+    revisions = list(previous.get("revisions", [])) if previous else []
+    if previous and previous.get("state") == "final" and previous.get("source_hash") != source_hash:
+        revision_path = directory / "revisions" / f"{matchday:02}" / f"{previous['source_hash']}.json"
+        _write(revision_path, previous, immutable=True)
+        revisions.append({"detected_at": checked_at, "previous_hash": previous["source_hash"], "new_hash": source_hash})
+    snapshot = {"schema_version": "1.0", "provider": PROVIDER, "season": profile.season.season, "matchday": matchday, "checked_at": checked_at, "source_url": performance_url(profile.season.season, matchday), "source_hash": source_hash, "state": parsed["state"], **content, "revisions": revisions, "validation": {"fixture_count": len(parsed["fixtures"]), "resolved": len(resolved), "unresolved": len(unresolved), "votes_coverage": sum(row["vote_fc"]["state"] != "unpublished" for row in resolved)}}
+    _write(path, snapshot)
+    return snapshot
+
+
+def _audit_performance(directory: Path, cumulative: list[dict[str, object]], players: list[dict[str, object]]) -> dict[str, object]:
+    resolved, unresolved = _resolve(cumulative, players)
+    totals: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    coverage: dict[str, bool] = defaultdict(bool)
+    for path in sorted((directory / "matchdays").glob("*.json")):
+        snapshot = _read(path) or {}
+        for event, available in snapshot.get("event_availability", {}).items():
+            coverage[event] = coverage[event] or bool(available)
+        for row in snapshot.get("players", []):
+            for event in ("assists", "penalties_scored", "penalties_missed"):
+                if row.get(event) is not None:
+                    totals[int(row["fantacalcio_id"])][event] += int(row[event])
+    discrepancies = []
+    for row in resolved:
+        for event in ("assists", "penalties_scored", "penalties_missed"):
+            if coverage[event] and int(totals[int(row["fantacalcio_id"])][event]) != int(row.get(event) or 0):
+                discrepancies.append({"fantacalcio_id": row["fantacalcio_id"], "metric": event, "matchdays": totals[int(row["fantacalcio_id"])][event], "cumulative": int(row.get(event) or 0)})
+    return {"cumulative_rows": len(resolved), "unresolved": len(unresolved), "coverage": dict(coverage), "discrepancies": discrepancies}
+
+
+def _check_performance(root: Path, profile: object, fetcher: FetchPage, players: list[dict[str, object]], checked_at: str, force: bool) -> dict[str, object]:
+    latest_html = fetcher(performance_url(profile.season.season, "ultima"))
+    soup = BeautifulSoup(latest_html, "html.parser")
+    heading = _text(soup.select_one("h1"))
+    found = re.search(r"(\d+)[ªa]? giornata", heading, re.I)
+    if not found:
+        raise FcoIntelligenceError("Latest played matchday could not be identified.")
+    latest = int(found.group(1))
+    directory = _directory(root, profile, "performance-v1")
+    candidates = []
+    for matchday in range(1, latest + 1):
+        existing = _read(directory / "matchdays" / f"{matchday:02}.json")
+        if existing and existing.get("state") == "final" and not force:
+            candidates.append((matchday, existing, None))
+            continue
+        html = latest_html if matchday == latest else fetcher(performance_url(profile.season.season, matchday))
+        candidates.append((matchday, None, parse_performance(html, profile.season.season, matchday)))
+    cumulative = parse_cumulative(fetcher(CUMULATIVE_URL.format(season=_slug(profile.season.season))), profile.season.season)
+    snapshots = [existing or _store_performance(root, profile, parsed, matchday, checked_at, players) for matchday, existing, parsed in candidates]
+    audit = _audit_performance(directory, cumulative, players)
+    index = {"schema_version": "1.0", "provider": PROVIDER, "season": profile.season.season, "checked_at": checked_at, "latest_played_matchday": latest, "available_matchdays": len(snapshots), "final_matchdays": sum(row["state"] == "final" for row in snapshots), "provisional_matchdays": sum(row["state"] == "provisional" for row in snapshots), "resolved": sum(len(row["players"]) for row in snapshots), "unresolved": sum(len(row["unresolved"]) for row in snapshots), "cumulative_audit": audit, "matchdays": [{"matchday": row["matchday"], "state": row["state"], "source_hash": row["source_hash"], "revision_count": len(row["revisions"])} for row in snapshots], "players": [player for row in snapshots for player in row["players"]]}
+    _write(directory / "index.json", index)
+    return index
+
+
+def _check_market(root: Path, profile: object, fetcher: FetchPage, players: list[dict[str, object]], checked_at: str) -> dict[str, object]:
+    ownership = {}
+    for cohort, query in (("overall", {"ruoli": "fcit"}), ("lte9", {"ruoli": "fcit", "leghe": "piccole"}), ("gte10", {"ruoli": "fcit", "leghe": "grandi"})):
+        ownership[cohort] = parse_ownership(fetcher(f"{OWNERSHIP_URL}?{urlencode(query)}"), profile.season.season, cohort)
+    if len({value["source_date"] for value in ownership.values()}) != 1:
+        raise FcoIntelligenceError("Ownership cohorts report different source dates.")
+    prices = parse_prices(fetcher(PRICE_URL), profile.season.season)
+    by_key: dict[tuple[str, str], dict[str, object]] = {}
+    for cohort, parsed in ownership.items():
+        for row in parsed["rows"]:
+            key = (normalize(row["provider_name"]), normalize(row["provider_team"]))
+            target = by_key.setdefault(key, {"provider_name": row["provider_name"], "provider_team": row["provider_team"], "quotation": row["quotation"], "ownership": {}})
+            target["ownership"][cohort] = {"pct": row["ownership_pct"], "delta_7d": row["ownership_delta_7d"]}
+    for row in prices["rows"]:
+        key = (normalize(row["provider_name"]), normalize(row["provider_team"]))
+        target = by_key.setdefault(key, {"provider_name": row["provider_name"], "provider_team": row["provider_team"], "quotation": row["quotation"], "ownership": {}})
+        target.update({field: row[field] for field in (*PRICE_FIELDS, "new_player")})
+    resolved, unresolved = _resolve(list(by_key.values()), players)
+    participant_count = len(profile.participants.team_names)
+    active_ownership = "lte9" if participant_count <= 9 else "gte10"
+    credit = 350 if profile.credits.starting <= 400 else 500
+    teams = 8 if participant_count <= 8 else 10
+    price_field = f"price_{teams}_{credit}"
+    for row in resolved:
+        selected = row["ownership"].get(active_ownership, {})
+        row.update({"ownership_pct": selected.get("pct"), "ownership_delta_7d": selected.get("delta_7d"), "ownership_cohort": active_ownership, "market_source_date": ownership["overall"]["source_date"], "price_source_date": prices["source_date"], "market_price": row.get(price_field), "market_price_cohort": {"teams": teams, "credits": credit}})
+    source_date = ownership["overall"]["source_date"]
+    snapshot = {"schema_version": "1.0", "provider": PROVIDER, "season": profile.season.season, "checked_at": checked_at, "market_source_date": source_date, "price_source_date": prices["source_date"], "minimum_auctions": 3, "ownership_source": "observed FCO league ownership percentage", "ownership_cohorts": ["overall", "lte9", "gte10"], "active_ownership_cohort": active_ownership, "active_price_cohort": {"teams": teams, "credits": credit, "field": price_field}, "players": resolved, "unresolved": unresolved, "summary": {"ownership_rows": len(ownership["overall"]["rows"]), "price_rows": len(prices["rows"]), "players": len(resolved), "current_season_prices": sum(any(row.get(field, {}).get("current_season") for field in PRICE_FIELDS) for row in resolved), "fallback_prices": sum(any(row.get(field, {}).get("fallback_previous_season") for field in PRICE_FIELDS) for row in resolved), "new_players": sum(bool(row.get("new_player")) for row in resolved), "unresolved": len(unresolved)}}
+    directory = _directory(root, profile, "market-v1")
+    historical = {key: value for key, value in snapshot.items() if key != "checked_at"}
+    _write(directory / "history" / f"{source_date}.json", historical, immutable=True)
+    _write(directory / "latest.json", snapshot)
+    return snapshot
+
+
+def _check_lineups(root: Path, profile: object, fetcher: FetchPage, players: list[dict[str, object]], checked_at: str, performance: dict[str, object]) -> dict[str, object]:
+    latest = int(performance.get("latest_played_matchday", 0))
+    current = next((row for row in performance.get("matchdays", []) if row.get("matchday") == latest), {})
+    matchday = latest if current.get("state") == "provisional" else min(38, latest + 1)
+    parsed = parse_lineups(fetcher(lineup_url(profile.season.season, matchday)), profile.season.season, matchday)
+    resolved, unresolved = _resolve(parsed["rows"], players)
+    snapshot = {"schema_version": "1.0", "provider": PROVIDER, "season": profile.season.season, "checked_at": checked_at, "source_url": lineup_url(profile.season.season, matchday), "matchday": matchday, "observation_at": parsed["observation_at"], "active_source_count": parsed["active_source_count"], "evaluated_players": parsed["evaluated_players"], "fixtures": parsed["fixtures"], "players": resolved, "unresolved": unresolved, "content_hash": _hash({"fixtures": parsed["fixtures"], "players": resolved, "unresolved": unresolved})}
+    directory = _directory(root, profile, "lineup-probability-v1")
+    stamp = re.sub(r"[^0-9]", "", parsed["observation_at"])
+    history = directory / "history" / f"{matchday:02}-{stamp}.json"
+    if not history.exists():
+        _write(history, {key: value for key, value in snapshot.items() if key != "checked_at"}, immutable=True)
+    _write(directory / "latest.json", snapshot)
+    return snapshot
+
+
+def check_updates(root: Path, profile: object, fetcher: FetchPage = fetch_page, *, force: bool = False, now: datetime | None = None) -> dict[str, object]:
+    """Refresh P1 sources; any failed source keeps its last valid snapshot."""
+    moment = now or datetime.now(timezone.utc)
+    checked_at = moment.isoformat()
+    players = _active_players(profile)
+    result = _status(root, profile)
+    errors = {}
+    for name, action in (
+        ("performance", lambda: _check_performance(root, profile, fetcher, players, checked_at, force)),
+        ("market", lambda: _check_market(root, profile, fetcher, players, checked_at)),
+    ):
+        if not force and _fresh(result.get(name), moment):
+            continue
+        try:
+            result[name] = action()
+        except Exception as error:
+            errors[name] = str(error)
+    try:
+        performance = result.get("performance") or {}
+        if not force and _fresh(result.get("lineups"), moment):
+            pass
+        elif performance:
+            result["lineups"] = _check_lineups(root, profile, fetcher, players, checked_at, performance)
+        else:
+            raise FcoIntelligenceError("Performance matchday is unavailable, so the upcoming round is unknown.")
+    except Exception as error:
+        errors["lineups"] = str(error)
+    result["errors"] = errors
+    result["state"] = "error" if errors else "fresh"
+    return result
