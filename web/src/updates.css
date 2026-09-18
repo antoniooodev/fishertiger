@@ -23,7 +23,7 @@
   .update-state.unchanged { border-color: var(--c-line); background: var(--c-surface-2); color: var(--c-text); }
   .update-state.baseline_missing { border-color: var(--c-info); color: var(--c-info); }
   .update-state.fresh { border-color: var(--c-go); color: var(--c-go); }
-  .update-state.stale, .update-state.unsupported { border-color: var(--c-warn); color: var(--c-warn); }
+  .update-state.warning, .update-state.stale, .update-state.unsupported { border-color: var(--c-warn); color: var(--c-warn); }
   .update-state.error { border-color: var(--c-stop); color: var(--c-stop); }
   .update-source-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-bottom: 1px solid var(--c-line); }
   .update-source-meta div { display: grid; align-content: start; gap: var(--s-1); min-width: 0; border-bottom: 1px solid var(--c-line-soft); padding: var(--s-3) var(--s-4); }

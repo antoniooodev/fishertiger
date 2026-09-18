@@ -10,9 +10,17 @@ import {
 
 const inFlightRefreshes = new Map();
 
-const sharedCheck = (profile, apiBase, key, force = false) => {
+export const sharedCheck = (profile, apiBase, key, force = false, fetchImpl) => {
+  if (force && inFlightRefreshes.has(key)) {
+    const queued = inFlightRefreshes.get(key)
+      .catch(() => null)
+      .then(() => checkInjuries(profile, { apiBase, force: true, fetchImpl }))
+      .finally(() => inFlightRefreshes.delete(key));
+    inFlightRefreshes.set(key, queued);
+    return queued;
+  }
   if (!inFlightRefreshes.has(key)) {
-    const request = checkInjuries(profile, { apiBase, force })
+    const request = checkInjuries(profile, { apiBase, force, fetchImpl })
       .finally(() => inFlightRefreshes.delete(key));
     inFlightRefreshes.set(key, request);
   }
@@ -28,12 +36,14 @@ export const normalizeInjuryStatus = (raw) => {
     : [];
   const unresolved = Array.isArray(snapshot?.unresolved) ? snapshot.unresolved : [];
   return {
-    state: ["unconfigured", "never_checked", "fresh", "stale", "unsupported", "error"].includes(raw?.state)
+    state: ["unconfigured", "never_checked", "fresh", "stale", "stale_source", "unsupported", "error"].includes(raw?.state)
       ? raw.state
       : "error",
     configured: raw?.configured === true,
     fresh: raw?.fresh === true,
     cacheAgeSeconds: Number.isFinite(raw?.cache_age_seconds) ? Math.max(0, raw.cache_age_seconds) : null,
+    sourceAgeSeconds: Number.isFinite(raw?.source_age_seconds) ? Math.max(0, raw.source_age_seconds) : null,
+    sourceFresh: raw?.source_fresh !== false,
     ttlSeconds: Number.isFinite(raw?.ttl_seconds) ? raw.ttl_seconds : 14400,
     warning: typeof raw?.warning === "string" ? raw.warning : "",
     snapshot: snapshot ? { ...snapshot, players, unresolved } : null,

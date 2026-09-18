@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   acceptSosFanta,
   acceptSosFantaFormations,
+  applySosFantaFormations,
   acceptSosFantaSetPieces,
   applySosFantaGoalkeepers,
   applyPlayerList,
@@ -25,6 +26,7 @@ import {
   sosFantaGoalkeepersUrl,
   checkSosFantaSetPieces,
   checkSosFantaGoalkeepers,
+  checkAllUpdateSources,
   uploadPlayerListCandidate,
   updateStateLabel,
 } from "./updates-client.js";
@@ -59,6 +61,29 @@ const displayFormationSnapshot = (change, prefix) => {
   const text = Array.isArray(value) ? value : value == null ? [] : [displayChangeValue(value)];
   return [formation, ...text].filter(Boolean).join("\n\n") || "-";
 };
+
+const HEALTH_LABELS = ["SOS Guida", "SOS Formazioni", "SOS Piazzati", "Listone", "SOS Portieri", "Disponibilità FCO"];
+
+function UpdateHealth({ profile, apiBase }) {
+  const [rows, setRows] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const checkAll = async () => { setBusy(true); setRows(await checkAllUpdateSources(profile, { apiBase })); setBusy(false); };
+  return (
+    <article className="update-source-card update-health-card">
+      <header><div><h2>Salute aggiornamenti</h2></div></header>
+      <div className="update-actions"><button className="update-check-button" onClick={checkAll} disabled={busy}><ActionIcon name="refresh" /><span>{busy ? "Controllo..." : "Controlla tutte le fonti"}</span></button></div>
+      <div className="listone-entry-list">
+        {(rows.length ? rows : HEALTH_LABELS.map((label) => ({ label }))).map(({ label, result, error }) => {
+          const issues = result?.audit?.summary?.issue_count || 0;
+          const records = result?.snapshot?.source_count;
+          const unresolved = result?.snapshot?.unresolved?.length;
+          const detail = error || (result ? `${updateStateLabel(result.state)}${issues ? ` · ${issues} problemi locali` : ""}${Number.isFinite(records) ? ` · ${records} record` : ""}${Number.isFinite(unresolved) ? ` · ${unresolved} irrisolti` : ""}` : "Non controllato");
+          return <p key={label}><strong>{label}</strong><span>{detail}</span></p>;
+        })}
+      </div>
+    </article>
+  );
+}
 
 function PlayerListUpdates({ profile, apiBase, onApplyStart, onApplied }) {
   const [candidate, setCandidate] = useState(null);
@@ -339,6 +364,11 @@ function FormationUpdates({ profile, apiBase }) {
         if (request !== sequence.current) return;
         setResult(next);
         setMessage(next.state === "changed" ? `${next.change_count} formazioni modificate.` : "Fonte e audit CSV verificati.");
+      } else if (action === "apply") {
+        const next = await applySosFantaFormations(profile, { apiBase, contentHash: result?.content_hash, auditHash: result?.audit_hash });
+        if (request !== sequence.current) return;
+        setResult((current) => ({ ...current, ...next }));
+        setMessage(`${next.applied_count} correzioni deterministiche applicate; audit rieseguito.`);
       } else {
         const next = await acceptSosFantaFormations(profile, { apiBase, contentHash: result?.content_hash });
         if (request !== sequence.current) return;
@@ -387,7 +417,7 @@ function FormationUpdates({ profile, apiBase }) {
     <article className="update-source-card">
       <header>
         <div><span className="source-index">02</span><h2>SOS Fanta Formazioni</h2></div>
-        <span className={`update-state ${result?.state || "idle"}`}>{updateStateLabel(result?.state)}</span>
+        <span className={`update-state ${auditSummary?.issue_count ? "warning" : result?.state || "idle"}`}>{updateStateLabel(result?.state)}{auditSummary?.issue_count ? ` · ${auditSummary.issue_count} problemi locali` : ""}</span>
       </header>
       <div className="update-source-meta">
         <div><span>Stagione</span><strong>{season}</strong></div>
@@ -404,6 +434,12 @@ function FormationUpdates({ profile, apiBase }) {
            <button className="update-download-button" onClick={downloadBundle} disabled={Boolean(busy)}>
              <ActionIcon name="download" />
              <span>{busy === "bundle" ? "Preparazione..." : "Scarica bundle AI"}</span>
+           </button>
+         )}
+         {(auditSummary?.missing_row || auditSummary?.status_mismatch) > 0 && (
+           <button className="update-accept-button" onClick={() => run("apply")} disabled={Boolean(busy)}>
+             <ActionIcon name="check" />
+             <span>{busy === "apply" ? "Applicazione..." : "Applica correzioni sicure"}</span>
            </button>
          )}
          {(result?.state === "baseline_missing" || result?.state === "changed") && (
@@ -457,7 +493,10 @@ function FormationUpdates({ profile, apiBase }) {
               <summary><span>{finding.team || "Squadra non risolta"}</span><b>{finding.issue || "problema"}</b></summary>
               <div className="listone-change-fields">
                 <p><strong>Stato</strong><span>{finding.current_status || "-"} → {finding.expected_status || "-"}</span></p>
+                <p><strong>Giocatore</strong><span>{finding.name || finding.current_name || "-"}</span></p>
+                <p><strong>Match</strong><span>{finding.match_method || "-"} · score {finding.match_score ?? "-"}</span></p>
                 <p><strong>Articolo</strong><span>{finding.source === "article" ? finding.name : "-"}{finding.id_fantacalcio ? ` · ID ${finding.id_fantacalcio}` : ""}</span></p>
+                {finding.best_candidate && <p><strong>Miglior candidato</strong><span>{finding.best_candidate} · {finding.match_score}</span></p>}
                 {(finding.current_name || finding.source === "current_csv") && <p><strong>Nome CSV</strong><span>{finding.current_name || finding.name}</span></p>}
                 {finding.diagnostic && <p><strong>Diagnostica</strong><span>{finding.diagnostic}</span></p>}
                 {finding.formation_text && <p><strong>Formazione</strong><span>{finding.formation_text}</span></p>}
@@ -659,6 +698,7 @@ const INJURY_STATE_LABELS = {
   never_checked: "Mai controllato",
   fresh: "Cache aggiornata",
   stale: "Cache scaduta",
+  stale_source: "Fonte non aggiornata",
   unsupported: "Copertura non disponibile",
   error: "Errore aggiornamento",
 };
@@ -710,6 +750,7 @@ export function InjuryUpdates({ injuryState }) {
         <div><span>Fonte</span><strong>{view.sourceLabel}</strong></div>
         <div><span>Ultimo controllo riuscito</span><strong>{snapshot?.checked_at?.slice(0, 16).replace("T", " ") || "Mai"}</strong></div>
         <div><span>Età cache</span><strong>{ageLabel(status.cacheAgeSeconds)}</strong></div>
+        <div><span>Età data fonte</span><strong>{ageLabel(status.sourceAgeSeconds)}</strong></div>
       </div>
       <div className="update-actions">
         <button className="update-check-button" type="button" onClick={refresh} disabled={busy}>
@@ -736,7 +777,7 @@ export function InjuryUpdates({ injuryState }) {
             {view.unresolved.map((player, index) => (
               <p key={`${player.provider_team_name}-${player.provider_player_name}-${index}`}>
                 <strong>{player.provider_player_name}</strong>
-                <span>{player.provider_team_name} · {player.match_failure}</span>
+                <span>{player.provider_team_name} · {player.reason_code || player.match_failure}{player.best_candidate ? ` · candidato ${player.best_candidate} (${player.best_score})` : ""}{player.second_candidate ? ` · secondo ${player.second_candidate} (${player.second_score})` : ""}</span>
               </p>
             ))}
           </div>
@@ -838,6 +879,8 @@ export function Updates({
         <h1>Aggiornamenti</h1>
         <p>Controlla le fonti, verifica le differenze e applica solo gli aggiornamenti approvati.</p>
       </div>
+
+      <UpdateHealth profile={profile} apiBase={apiBase} />
 
       <div className="update-workflow" aria-label="Come usare gli aggiornamenti">
         <strong>Come funziona</strong>

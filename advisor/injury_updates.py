@@ -13,31 +13,17 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 from bs4 import BeautifulSoup
-from rapidfuzz import fuzz
-
-from .pipeline import normalize
+from .player_identity import load_identity_overrides, normalize, resolve_player
 from .player_list_updates import active_player_list_path, read_player_list, season_years
 
 SOURCE_URL = "https://www.fantacalcio-online.com/it/infortunati-serie-a"
 TTL_SECONDS = 4 * 60 * 60
+SOURCE_STALE_SECONDS = 48 * 60 * 60
 MAX_RESPONSE_BYTES = 5_000_000
-FUZZY_THRESHOLD = 90.0
-FUZZY_MARGIN = 7.0
 FetchPage = Callable[[str], str]
 HEADERS = ("Squadra", "Calciatore", "Perché è fuori", "Rientro previsto", "La data arriva da")
 _LOCKS: dict[Path, threading.Lock] = {}
 _LOCKS_GUARD = threading.Lock()
-
-TEAM_ALIASES = {
-    "ac milan": "milan", "ac monza": "monza", "acf fiorentina": "fiorentina",
-    "as roma": "roma", "bologna fc": "bologna", "cagliari calcio": "cagliari",
-    "como 1907": "como", "genoa cfc": "genoa", "hellas verona": "verona",
-    "inter milan": "inter", "internazionale": "inter", "internazionale milano": "inter",
-    "juventus fc": "juventus", "parma calcio 1913": "parma", "ss lazio": "lazio",
-    "ssc napoli": "napoli", "torino fc": "torino", "udinese calcio": "udinese",
-    "us lecce": "lecce", "us sassuolo calcio": "sassuolo",
-}
-
 
 class InjuryUpdateError(ValueError):
     """The remote page, player source, or stored snapshot is invalid."""
@@ -131,58 +117,21 @@ def parse_fantacalcio_online_injuries(html: str, season: str) -> dict[str, objec
     return {"source_date": source_date, "source_count": source_count, "records": records}
 
 
-def _team_key(value: object) -> str:
-    key = normalize(value)
-    return TEAM_ALIASES.get(key, key)
-
-
-def _name_score(provider_name: str, candidate_name: str) -> float:
-    provider = normalize(re.sub(r"\s+-\s*$", "", provider_name).strip())
-    candidate = normalize(candidate_name)
-    if not provider or not candidate:
-        return 0.0
-    if provider == candidate or sorted(provider.split()) == sorted(candidate.split()):
-        return 100.0
-    score = max(fuzz.WRatio(provider, candidate), fuzz.token_sort_ratio(provider, candidate))
-    provider_tokens, candidate_tokens = provider.replace("-", " ").split(), candidate.replace("-", " ").split()
-    long_candidate = [token for token in candidate_tokens if len(token) > 3]
-    short_candidate = [token for token in candidate_tokens if len(token) <= 3]
-    remaining = provider_tokens.copy()
-    for token in long_candidate:
-        if token not in remaining:
-            break
-        remaining.remove(token)
-    else:
-        if short_candidate and len(short_candidate) <= len(remaining) and all(any(other.startswith(token) for other in remaining) for token in short_candidate):
-            score = max(score, 96.0)
-    return float(score)
-
-
 def match_player(provider_name: str, provider_team: str, players: list[dict[str, object]]) -> dict[str, object]:
-    team_key = _team_key(provider_team)
-    teams = sorted({str(player["Squadra"]) for player in players if _team_key(player["Squadra"]) == team_key})
-    if len(teams) != 1:
-        return {"matched": False, "reason": "team_unmatched" if not teams else "team_ambiguous"}
-    candidates = [player for player in players if str(player["Squadra"]) == teams[0]]
-    exact = [player for player in candidates if _name_score(provider_name, str(player["Nome"])) == 100]
-    if len(exact) == 1:
-        return {"matched": True, "player": exact[0], "method": "exact", "score": 100.0}
-    if len(exact) > 1:
-        return {"matched": False, "reason": "player_ambiguous", "candidates": [int(item["Id"]) for item in exact]}
-    ranked = sorted(((_name_score(provider_name, str(player["Nome"])), player) for player in candidates), key=lambda item: item[0], reverse=True)
-    best_score, best = ranked[0] if ranked else (0.0, None)
-    second_score = ranked[1][0] if len(ranked) > 1 else 0.0
-    if best is not None and best_score >= FUZZY_THRESHOLD and best_score - second_score >= FUZZY_MARGIN:
-        return {"matched": True, "player": best, "method": "fuzzy_unique", "score": round(best_score, 1)}
-    return {"matched": False, "reason": "player_ambiguous" if best_score >= FUZZY_THRESHOLD else "player_unmatched", "best_score": round(best_score, 1), "second_score": round(second_score, 1)}
+    result = resolve_player(provider_name, provider_team, players, source="fantacalcio-online", overrides=load_identity_overrides())
+    if result.get("method") == "safe_variant":
+        result["method"] = "fuzzy_unique"
+    result["reason"] = {"ambiguous": "player_ambiguous", "team_not_in_active_listone": "team_unmatched", "below_threshold": "player_unmatched", "player_not_in_active_listone": "player_unmatched"}.get(result.get("reason"), result.get("reason"))
+    return result
 
 
 def match_injuries(records: list[dict[str, object]], players: list[dict[str, object]]) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     resolved, unresolved = [], []
     for record in records:
-        match = match_player(str(record["provider_player_name"]), str(record["provider_team_name"]), players)
+        match = resolve_player(str(record["provider_player_name"]), str(record["provider_team_name"]), players, source="fantacalcio-online", overrides=load_identity_overrides())
         if not match["matched"]:
-            unresolved.append({**record, "match_failure": match["reason"], **{key: value for key, value in match.items() if key not in {"matched", "reason"}}})
+            legacy = {"ambiguous": "player_ambiguous", "team_not_in_active_listone": "team_unmatched", "below_threshold": "player_unmatched"}.get(match["reason"], match["reason"])
+            unresolved.append({**record, "match_failure": legacy, "reason_code": match["reason"], **{key: value for key, value in match.items() if key not in {"matched", "reason"}}})
             continue
         candidate = match["player"]
         resolved.append({**record, "fantacalcio_id": int(candidate["Id"]), "fantacalcio_name": str(candidate["Nome"]), "fantacalcio_team": str(candidate["Squadra"]), "role": str(candidate["R"]), "match_method": match["method"], "match_score": match["score"]})
@@ -250,7 +199,18 @@ def _age(snapshot: dict[str, object] | None, now: datetime) -> float | None:
 
 def _status(snapshot: dict[str, object] | None, now: datetime, state: str, warning: str | None = None) -> dict[str, object]:
     age = _age(snapshot, now)
-    return {"state": state, "configured": True, "fresh": state == "fresh", "cache_age_seconds": round(age) if age is not None else None, "ttl_seconds": TTL_SECONDS, "snapshot": snapshot, "warning": warning}
+    source_age = None
+    if snapshot is not None:
+        try:
+            source_date = datetime.strptime(str(snapshot["source_date"]), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            source_age = max(0.0, (now - source_date).total_seconds())
+        except (KeyError, TypeError, ValueError) as error:
+            raise InjuryUpdateError("The stored injury snapshot has an invalid source date.") from error
+    stale_source = source_age is not None and source_age > SOURCE_STALE_SECONDS
+    if state == "fresh" and stale_source:
+        state = "stale_source"
+        warning = warning or "Fantacalcio Online source date is older than 48 hours."
+    return {"state": state, "configured": True, "fresh": state in {"fresh", "stale_source"}, "cache_age_seconds": round(age) if age is not None else None, "source_age_seconds": round(source_age) if source_age is not None else None, "source_fresh": not stale_source if source_age is not None else None, "ttl_seconds": TTL_SECONDS, "snapshot": snapshot, "warning": warning}
 
 
 def stored_status(root: Path, profile_id: str, season: str, *, now: datetime | None = None) -> dict[str, object]:

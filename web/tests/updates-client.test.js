@@ -9,6 +9,7 @@ import {
   checkSosFantaSetPieces,
   checkSosFantaGoalkeepers,
   checkInjuries,
+  checkAllUpdateSources,
   getInjuryStatus,
   fantacalcioDownloadUrl,
   fetchSosFantaFormationBundle,
@@ -96,6 +97,21 @@ test("manual injury refresh explicitly bypasses the backend freshness guard", as
     },
   });
   assert.equal(headers["X-Force-Refresh"], "true");
+});
+
+test("check-all tolerates one failure and only calls check endpoints", async () => {
+  const urls = [];
+  const rows = await checkAllUpdateSources({ profile_id: "league" }, {
+    fetchImpl: async (url) => {
+      urls.push(url);
+      if (url.includes("sosfanta-formations")) throw new Error("offline");
+      return { ok: true, status: 200, json: async () => ({ state: "unchanged" }) };
+    },
+  });
+  assert.equal(rows.length, 6);
+  assert.equal(rows.filter((row) => row.error).length, 1);
+  assert.equal(urls.every((url) => url.endsWith("/check")), true);
+  assert.equal(urls.some((url) => url.includes("/apply") || url.includes("/accept")), false);
 });
 
 test("maps profile seasons to official Fantacalcio downloads", () => {

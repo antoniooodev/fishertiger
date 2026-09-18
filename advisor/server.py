@@ -67,6 +67,7 @@ from .sosfanta_set_piece_updates import (
 )
 from .sosfanta_formations_updates import (
     accept_latest as accept_latest_formations,
+    apply_safe_updates as apply_safe_formation_updates,
     build_bundle as build_formations_bundle,
     check_updates as check_formation_updates,
     stored_status as stored_formation_status,
@@ -240,6 +241,9 @@ class LocalApiHandler(BaseHTTPRequestHandler):
             return
         if self._path() == "/api/updates/sosfanta-formations/bundle":
             self._formation_bundle()
+            return
+        if self._path() == "/api/updates/sosfanta-formations/apply":
+            self._apply_formation_updates()
             return
         if self._path() == "/api/updates/sosfanta-goalkeepers/check":
             self._check_goalkeeper_updates()
@@ -847,6 +851,29 @@ class LocalApiHandler(BaseHTTPRequestHandler):
             f'sosfanta-formazioni-update-{season.replace("/", "-")}.txt',
         )
 
+    def _apply_formation_updates(self) -> None:
+        request = self._update_request()
+        if request is None:
+            return
+        profile, profile_id, season, content_hash, audit_hash = request
+        profile = self._derive_calendar_participants(profile)
+        paths = self._formation_source_paths(profile)
+        if paths is None:
+            return
+        try:
+            result = apply_safe_formation_updates(
+                self.server.updates_dir, profile_id, season, *paths, content_hash, audit_hash,
+                lambda: generate_dataset(profile, self.server.datasets_dir, generator=self.server.generator),
+            )
+        except SosFantaError as error:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "update_unavailable", str(error))
+            return
+        except Exception:
+            traceback.print_exc(file=sys.stderr)
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "generation_failed", "The safe formation update could not be completed.")
+            return
+        self._send_json(HTTPStatus.OK, result)
+
     def _check_goalkeeper_updates(self) -> None:
         request = self._update_request()
         if request is None:
@@ -1106,7 +1133,7 @@ class LocalApiHandler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Methods", "GET, PUT, POST, DELETE, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Filename")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Filename, X-Force-Refresh")
         self.send_header("Content-Type", content_type)
         if filename:
             self.send_header("Content-Disposition", f'attachment; filename="{filename}"')

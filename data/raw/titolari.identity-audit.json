@@ -1,0 +1,1186 @@
+{
+  "total": 434,
+  "ids_before": 206,
+  "ids_after": 391,
+  "exact_backfilled": 185,
+  "override_backfilled": 0,
+  "unresolved": [
+    {
+      "row": 4,
+      "name": "Kristensen",
+      "team": "Atalanta",
+      "matched": false,
+      "reason": "canonical_identity_conflict",
+      "normalized_source_name": "kristensen",
+      "normalized_source_team": "atalanta",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": [
+        6485
+      ]
+    },
+    {
+      "row": 9,
+      "name": "Ederson",
+      "team": "Atalanta",
+      "matched": false,
+      "reason": "canonical_identity_conflict",
+      "normalized_source_name": "ederson",
+      "normalized_source_team": "atalanta",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": [
+        5792
+      ]
+    },
+    {
+      "row": 18,
+      "name": "Ahanor",
+      "team": "Atalanta",
+      "matched": false,
+      "reason": "invalid_existing_id",
+      "normalized_source_name": "ahanor",
+      "normalized_source_team": "atalanta",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": []
+    },
+    {
+      "row": 25,
+      "name": "Miranda",
+      "team": "Bologna",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Miranda J.",
+      "candidate_ids": [
+        4734
+      ]
+    },
+    {
+      "row": 26,
+      "name": "Moro",
+      "team": "Bologna",
+      "matched": false,
+      "reason": "canonical_identity_conflict",
+      "normalized_source_name": "moro",
+      "normalized_source_team": "bologna",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": [
+        6054
+      ]
+    },
+    {
+      "row": 44,
+      "name": "Rodriguez",
+      "team": "Cagliari",
+      "matched": false,
+      "reason": "canonical_identity_conflict",
+      "normalized_source_name": "rodriguez",
+      "normalized_source_team": "cagliari",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": [
+        7268
+      ]
+    },
+    {
+      "row": 53,
+      "name": "Prati",
+      "team": "Cagliari",
+      "matched": false,
+      "reason": "below_threshold",
+      "normalized_source_name": "prati",
+      "normalized_source_team": "cagliari",
+      "best_candidate": "Radunovic",
+      "best_score": 51.4,
+      "second_candidate": "Sugawara",
+      "second_score": 51.4,
+      "candidate_ids": [
+        4360,
+        6650,
+        3,
+        4210,
+        5701,
+        7621,
+        7532,
+        7274,
+        7268,
+        7125,
+        7548,
+        4870,
+        7311,
+        4260,
+        6010,
+        6640,
+        7579,
+        1871,
+        801,
+        6815,
+        7165,
+        5462,
+        7547,
+        4896,
+        6243,
+        7374,
+        5336,
+        7317
+      ]
+    },
+    {
+      "row": 55,
+      "name": "Mendy",
+      "team": "Cagliari",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Mendy P.",
+      "candidate_ids": [
+        7374
+      ]
+    },
+    {
+      "row": 60,
+      "name": "Chalobah",
+      "team": "Como",
+      "matched": false,
+      "reason": "canonical_identity_conflict",
+      "normalized_source_name": "chalobah",
+      "normalized_source_team": "como",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": [
+        5641
+      ]
+    },
+    {
+      "row": 66,
+      "name": "Paz",
+      "team": "Como",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 90.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Paz N.",
+      "candidate_ids": [
+        6875
+      ]
+    },
+    {
+      "row": 69,
+      "name": "Smolcic",
+      "team": "Como",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Smolcic I.",
+      "candidate_ids": [
+        7014
+      ]
+    },
+    {
+      "row": 72,
+      "name": "Rodriguez",
+      "team": "Como",
+      "matched": false,
+      "reason": "canonical_identity_conflict",
+      "normalized_source_name": "rodriguez",
+      "normalized_source_team": "como",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": [
+        7129
+      ]
+    },
+    {
+      "row": 76,
+      "name": "Van Der Brempt",
+      "team": "Como",
+      "matched": false,
+      "reason": "canonical_identity_conflict",
+      "normalized_source_name": "van der brempt",
+      "normalized_source_team": "como",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": [
+        6896
+      ]
+    },
+    {
+      "row": 78,
+      "name": "Jimenez",
+      "team": "Fiorentina",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Jimenez A.",
+      "candidate_ids": [
+        6531
+      ]
+    },
+    {
+      "row": 87,
+      "name": "Ranieri",
+      "team": "Fiorentina",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Ranieri L.",
+      "candidate_ids": [
+        4378
+      ]
+    },
+    {
+      "row": 112,
+      "name": "Norton-Cuffy",
+      "team": "Genoa",
+      "matched": false,
+      "reason": "below_threshold",
+      "normalized_source_name": "norton-cuffy",
+      "normalized_source_team": "genoa",
+      "best_candidate": "Otoa",
+      "best_score": 67.5,
+      "second_candidate": "Vitinha O.",
+      "second_score": 60.0,
+      "candidate_ids": [
+        7332,
+        219,
+        6569,
+        5750,
+        5514,
+        6660,
+        7537,
+        5742,
+        6977,
+        7413,
+        791,
+        5823,
+        5791,
+        5946,
+        6020,
+        7409,
+        7341,
+        4970,
+        2857,
+        6980,
+        4923,
+        6164,
+        7600,
+        7453,
+        7622
+      ]
+    },
+    {
+      "row": 117,
+      "name": "Vitinha",
+      "team": "Genoa",
+      "matched": false,
+      "reason": "canonical_identity_conflict",
+      "normalized_source_name": "vitinha",
+      "normalized_source_team": "genoa",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": [
+        6164
+      ]
+    },
+    {
+      "row": 121,
+      "name": "Traoré",
+      "team": "Genoa",
+      "matched": false,
+      "reason": "canonical_identity_conflict",
+      "normalized_source_name": "traore",
+      "normalized_source_team": "genoa",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": [
+        2857
+      ]
+    },
+    {
+      "row": 123,
+      "name": "Martin",
+      "team": "Genoa",
+      "matched": false,
+      "reason": "below_threshold",
+      "normalized_source_name": "martin",
+      "normalized_source_team": "genoa",
+      "best_candidate": "Sommariva",
+      "best_score": 60.0,
+      "second_candidate": "Marcandalli",
+      "second_score": 60.0,
+      "candidate_ids": [
+        7332,
+        219,
+        6569,
+        5750,
+        5514,
+        6660,
+        7537,
+        5742,
+        6977,
+        7413,
+        791,
+        5823,
+        5791,
+        5946,
+        6020,
+        7409,
+        7341,
+        4970,
+        2857,
+        6980,
+        4923,
+        6164,
+        7600,
+        7453,
+        7622
+      ]
+    },
+    {
+      "row": 132,
+      "name": "Jones",
+      "team": "Inter",
+      "matched": false,
+      "reason": "canonical_identity_conflict",
+      "normalized_source_name": "jones",
+      "normalized_source_team": "inter",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": [
+        5172
+      ]
+    },
+    {
+      "row": 139,
+      "name": "Pio Esposito",
+      "team": "Inter",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.2,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Esposito F.P.",
+      "candidate_ids": [
+        7071
+      ]
+    },
+    {
+      "row": 140,
+      "name": "Sucic",
+      "team": "Inter",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Sucic P.",
+      "candidate_ids": [
+        7070
+      ]
+    },
+    {
+      "row": 158,
+      "name": "Kelly",
+      "team": "Juventus",
+      "matched": false,
+      "reason": "canonical_identity_conflict",
+      "normalized_source_name": "kelly",
+      "normalized_source_team": "juventus",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": [
+        6766
+      ]
+    },
+    {
+      "row": 160,
+      "name": "Thuram",
+      "team": "Juventus",
+      "matched": false,
+      "reason": "canonical_identity_conflict",
+      "normalized_source_name": "thuram",
+      "normalized_source_team": "juventus",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": [
+        5562
+      ]
+    },
+    {
+      "row": 162,
+      "name": "David",
+      "team": "Juventus",
+      "matched": false,
+      "reason": "below_threshold",
+      "normalized_source_name": "david",
+      "normalized_source_team": "juventus",
+      "best_candidate": "Kolo Muani",
+      "best_score": 45.0,
+      "second_candidate": "Woltemade",
+      "second_score": 45.0,
+      "candidate_ids": [
+        4964,
+        1930,
+        7603,
+        2788,
+        4976,
+        4657,
+        5520,
+        6042,
+        6766,
+        5831,
+        294,
+        6039,
+        4973,
+        6884,
+        4179,
+        7436,
+        827,
+        5562,
+        5685,
+        5680,
+        5761,
+        4911,
+        5951,
+        6752,
+        6434,
+        2832,
+        2012,
+        6822
+      ]
+    },
+    {
+      "row": 163,
+      "name": "Perin",
+      "team": "Juventus",
+      "matched": false,
+      "reason": "invalid_existing_id",
+      "normalized_source_name": "perin",
+      "normalized_source_team": "juventus",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": []
+    },
+    {
+      "row": 171,
+      "name": "Taylor",
+      "team": "Lazio",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Taylor K.",
+      "candidate_ids": [
+        7314
+      ]
+    },
+    {
+      "row": 175,
+      "name": "Dia",
+      "team": "Lazio",
+      "matched": false,
+      "reason": "below_threshold",
+      "normalized_source_name": "dia",
+      "normalized_source_team": "lazio",
+      "best_candidate": "Cataldi",
+      "best_score": 72.0,
+      "second_candidate": "Pinamonti",
+      "second_score": 60.0,
+      "candidate_ids": [
+        6482,
+        7337,
+        7534,
+        6320,
+        5620,
+        7580,
+        460,
+        4817,
+        2188,
+        7012,
+        7131,
+        2263,
+        2728,
+        327,
+        632,
+        7314,
+        5800,
+        2848,
+        5500,
+        6398,
+        4459,
+        6629,
+        333,
+        6191,
+        7345,
+        2038,
+        6556
+      ]
+    },
+    {
+      "row": 177,
+      "name": "Tavares",
+      "team": "Lazio",
+      "matched": false,
+      "reason": "canonical_identity_conflict",
+      "normalized_source_name": "tavares",
+      "normalized_source_team": "lazio",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": [
+        5620
+      ]
+    },
+    {
+      "row": 179,
+      "name": "Ratkov",
+      "team": "Lazio",
+      "matched": false,
+      "reason": "below_threshold",
+      "normalized_source_name": "ratkov",
+      "normalized_source_team": "lazio",
+      "best_candidate": "Provstgaard",
+      "best_score": 54.0,
+      "second_candidate": "Rovella",
+      "second_score": 46.2,
+      "candidate_ids": [
+        6482,
+        7337,
+        7534,
+        6320,
+        5620,
+        7580,
+        460,
+        4817,
+        2188,
+        7012,
+        7131,
+        2263,
+        2728,
+        327,
+        632,
+        7314,
+        5800,
+        2848,
+        5500,
+        6398,
+        4459,
+        6629,
+        333,
+        6191,
+        7345,
+        2038,
+        6556
+      ]
+    },
+    {
+      "row": 187,
+      "name": "Gaspar",
+      "team": "Lecce",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Gaspar K.",
+      "candidate_ids": [
+        6632
+      ]
+    },
+    {
+      "row": 190,
+      "name": "Coulibaly",
+      "team": "Lecce",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Coulibaly L.",
+      "candidate_ids": [
+        5504
+      ]
+    },
+    {
+      "row": 192,
+      "name": "Berisha",
+      "team": "Lecce",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Berisha M.",
+      "candidate_ids": [
+        6015
+      ]
+    },
+    {
+      "row": 201,
+      "name": "Ivan Ilic",
+      "team": "Lecce",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 90.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Ilic",
+      "candidate_ids": [
+        5007
+      ]
+    },
+    {
+      "row": 212,
+      "name": "Leao",
+      "team": "Milan",
+      "matched": false,
+      "reason": "below_threshold",
+      "normalized_source_name": "leao",
+      "normalized_source_team": "milan",
+      "best_candidate": "Saelemaekers",
+      "best_score": 67.5,
+      "second_candidate": "Loftus-Cheek",
+      "second_score": 60.0,
+      "candidate_ids": [
+        4312,
+        2815,
+        6813,
+        5022,
+        5833,
+        6496,
+        4401,
+        4751,
+        5739,
+        5273,
+        7525,
+        5812,
+        2423,
+        2379,
+        2606,
+        4892,
+        6372,
+        4856,
+        7618,
+        7203,
+        6618,
+        4199,
+        5295,
+        7572,
+        6397,
+        6519
+      ]
+    },
+    {
+      "row": 222,
+      "name": "Delli Carri",
+      "team": "Monza",
+      "matched": false,
+      "reason": "invalid_existing_id",
+      "normalized_source_name": "delli carri",
+      "normalized_source_team": "monza",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": []
+    },
+    {
+      "row": 223,
+      "name": "Carboni",
+      "team": "Monza",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Carboni A.",
+      "candidate_ids": [
+        4925
+      ]
+    },
+    {
+      "row": 225,
+      "name": "Tourè",
+      "team": "Monza",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Tourè I.",
+      "candidate_ids": [
+        7146
+      ]
+    },
+    {
+      "row": 232,
+      "name": "Forson",
+      "team": "Monza",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Forson O.",
+      "candidate_ids": [
+        6592
+      ]
+    },
+    {
+      "row": 233,
+      "name": "Varela",
+      "team": "Monza",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Varela G.",
+      "candidate_ids": [
+        7523
+      ]
+    },
+    {
+      "row": 234,
+      "name": "Robinson",
+      "team": "Monza",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Robinson J.",
+      "candidate_ids": [
+        7546
+      ]
+    },
+    {
+      "row": 236,
+      "name": "Azzi",
+      "team": "Monza",
+      "matched": false,
+      "reason": "below_threshold",
+      "normalized_source_name": "azzi",
+      "normalized_source_team": "monza",
+      "best_candidate": "Ziolkowski",
+      "best_score": 60.0,
+      "second_candidate": "Colpani",
+      "second_score": 51.4,
+      "candidate_ids": [
+        4485,
+        7301,
+        7475,
+        7485,
+        5838,
+        6659,
+        7238,
+        4925,
+        7476,
+        6537,
+        5399,
+        7260,
+        7604,
+        5878,
+        6593,
+        2741,
+        7146,
+        6252,
+        7477,
+        5880,
+        6592,
+        7574,
+        7575,
+        2155,
+        7523,
+        7620,
+        6145,
+        5882,
+        7546
+      ]
+    },
+    {
+      "row": 250,
+      "name": "Anguissa",
+      "team": "Napoli",
+      "matched": false,
+      "reason": "canonical_identity_conflict",
+      "normalized_source_name": "anguissa",
+      "normalized_source_team": "napoli",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": [
+        4220
+      ]
+    },
+    {
+      "row": 263,
+      "name": "Keita",
+      "team": "Parma",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Keita M.",
+      "candidate_ids": [
+        6898
+      ]
+    },
+    {
+      "row": 267,
+      "name": "Romero",
+      "team": "Parma",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Romero D.",
+      "candidate_ids": [
+        7554
+      ]
+    },
+    {
+      "row": 268,
+      "name": "Tourè",
+      "team": "Parma",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Tourè E.",
+      "candidate_ids": [
+        6229
+      ]
+    },
+    {
+      "row": 270,
+      "name": "Sorensen",
+      "team": "Parma",
+      "matched": false,
+      "reason": "below_threshold",
+      "normalized_source_name": "sorensen",
+      "normalized_source_team": "parma",
+      "best_candidate": "Tourè E.",
+      "best_score": 53.3,
+      "second_candidate": "Ordonez C.",
+      "second_score": 47.1,
+      "candidate_ids": [
+        7411,
+        6662,
+        2874,
+        6664,
+        5862,
+        4137,
+        5307,
+        7235,
+        7255,
+        7202,
+        7615,
+        6149,
+        6666,
+        4349,
+        6898,
+        6206,
+        6207,
+        7138,
+        7536,
+        7276,
+        6229,
+        7554,
+        7213,
+        7342,
+        7561,
+        7568
+      ]
+    },
+    {
+      "row": 271,
+      "name": "Diallo",
+      "team": "Parma",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Diallo O.",
+      "candidate_ids": [
+        7536
+      ]
+    },
+    {
+      "row": 278,
+      "name": "Molina",
+      "team": "Roma",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Molina N.",
+      "candidate_ids": [
+        4998
+      ]
+    },
+    {
+      "row": 279,
+      "name": "Koné",
+      "team": "Roma",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 90.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Konè M.",
+      "candidate_ids": [
+        5589
+      ]
+    },
+    {
+      "row": 286,
+      "name": "Pellegrini",
+      "team": "Roma",
+      "matched": false,
+      "reason": "canonical_identity_conflict",
+      "normalized_source_name": "pellegrini",
+      "normalized_source_team": "roma",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": [
+        530
+      ]
+    },
+    {
+      "row": 287,
+      "name": "Castro",
+      "team": "Roma",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Castro S.",
+      "candidate_ids": [
+        6572
+      ]
+    },
+    {
+      "row": 290,
+      "name": "El Aynaoui",
+      "team": "Roma",
+      "matched": false,
+      "reason": "invalid_existing_id",
+      "normalized_source_name": "el aynaoui",
+      "normalized_source_team": "roma",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": []
+    },
+    {
+      "row": 296,
+      "name": "Leysen",
+      "team": "Sassuolo",
+      "matched": false,
+      "reason": "canonical_identity_conflict",
+      "normalized_source_name": "leysen",
+      "normalized_source_team": "sassuolo",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": [
+        7564
+      ]
+    },
+    {
+      "row": 326,
+      "name": "Adams",
+      "team": "Torino",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Adams C.",
+      "candidate_ids": [
+        6646
+      ]
+    },
+    {
+      "row": 335,
+      "name": "Kamara",
+      "team": "Udinese",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Kamara H.",
+      "candidate_ids": [
+        5555
+      ]
+    },
+    {
+      "row": 338,
+      "name": "Davis",
+      "team": "Udinese",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Davis K.",
+      "candidate_ids": [
+        5637
+      ]
+    },
+    {
+      "row": 341,
+      "name": "Miller",
+      "team": "Udinese",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Miller L.",
+      "candidate_ids": [
+        7208
+      ]
+    },
+    {
+      "row": 343,
+      "name": "Bayo",
+      "team": "Udinese",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 90.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Bayo V.",
+      "candidate_ids": [
+        7161
+      ]
+    },
+    {
+      "row": 344,
+      "name": "Mlacic",
+      "team": "Udinese",
+      "matched": false,
+      "reason": "invalid_existing_id",
+      "normalized_source_name": "mlacic",
+      "normalized_source_team": "udinese",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": []
+    },
+    {
+      "row": 354,
+      "name": "Yeboah",
+      "team": "Venezia",
+      "matched": false,
+      "reason": "canonical_identity_conflict",
+      "normalized_source_name": "yeboah",
+      "normalized_source_team": "venezia",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": [
+        6904
+      ]
+    },
+    {
+      "row": 356,
+      "name": "Moreno",
+      "team": "Venezia",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Moreno M.",
+      "candidate_ids": [
+        6890
+      ]
+    },
+    {
+      "row": 357,
+      "name": "Correia",
+      "team": "Venezia",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Correia T.",
+      "candidate_ids": [
+        4845
+      ]
+    },
+    {
+      "row": 359,
+      "name": "Rrahmani",
+      "team": "Venezia",
+      "matched": false,
+      "reason": "canonical_identity_conflict",
+      "normalized_source_name": "rrahmani",
+      "normalized_source_team": "venezia",
+      "best_candidate": null,
+      "best_score": 0.0,
+      "second_candidate": null,
+      "second_score": 0.0,
+      "candidate_ids": [
+        7449
+      ]
+    },
+    {
+      "row": 367,
+      "name": "Ricci",
+      "team": "Como",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Ricci S.",
+      "candidate_ids": [
+        5453
+      ]
+    },
+    {
+      "row": 423,
+      "name": "Gudmundsson",
+      "team": "Lazio",
+      "matched": false,
+      "method": "fuzzy_unique",
+      "score": 95.0,
+      "reason": "fuzzy_only_not_persisted",
+      "best_candidate": "Gudmundsson A.",
+      "candidate_ids": [
+        5800
+      ]
+    }
+  ],
+  "conflicts": 23
+}

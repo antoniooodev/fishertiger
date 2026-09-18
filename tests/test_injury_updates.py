@@ -123,6 +123,16 @@ def test_check_persists_v2_atomically_and_status_obeys_ttl(tmp_path):
     assert stored_status(root, "injury-test", "2026/27", now=NOW + timedelta(seconds=TTL_SECONDS + 1))["state"] == "stale"
 
 
+def test_fresh_cache_with_old_declared_source_date_is_warned(tmp_path):
+    profile = profile_with_list(tmp_path)
+    root = tmp_path / "updates"
+    result = check_updates(root, profile, lambda _url: fixture(), now=NOW + timedelta(days=3))
+    assert result["state"] == "stale_source"
+    assert result["fresh"] is True
+    assert result["source_fresh"] is False
+    assert result["source_age_seconds"] > 48 * 60 * 60
+
+
 def test_fresh_cache_skips_network_and_manual_force_fetches(tmp_path):
     profile = profile_with_list(tmp_path)
     root = tmp_path / "updates"

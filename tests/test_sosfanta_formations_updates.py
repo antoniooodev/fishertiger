@@ -8,6 +8,7 @@ import pandas as pd
 
 from advisor.sosfanta_formations_updates import (
     accept_latest,
+    apply_safe_updates,
     audit_starters,
     build_bundle,
     check_updates,
@@ -232,6 +233,28 @@ class SosFantaFormationsUpdatesTests(unittest.TestCase):
                 checking.result(timeout=5)
                 with self.assertRaises(SosFantaError):
                     accepting.result(timeout=5)
+
+    def test_safe_apply_updates_structural_status_adds_missing_and_preserves_omissions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            teams = extract_formations(article(), "2026/27")
+            starters, listone = write_sources(root, teams)
+            rows = pd.read_csv(starters, dtype=str)
+            rows.loc[0, "status"] = "RISERVA"
+            missing_id = rows.loc[1, "id_fantacalcio"]
+            rows = rows.drop(index=1)
+            rows.loc[len(rows)] = {"squadra": "Atalanta", "nome": "Omitted", "id_fantacalcio": "9999", "status": "RISERVA", "note": "keep"}
+            rows.to_csv(starters, index=False)
+            initial = check_updates(root, "profile", "2026/27", starters, listone, lambda _: article())
+            before = initial["audit"]["summary"]["issue_count"]
+            applied = apply_safe_updates(root, "profile", "2026/27", starters, listone, initial["content_hash"], initial["audit_hash"], lambda: None)
+            after = pd.read_csv(starters, dtype=str, keep_default_na=False)
+            self.assertEqual(after.loc[after.id_fantacalcio == "1", "status"].iloc[0], "TITOLARE")
+            self.assertEqual(after.loc[after.id_fantacalcio == missing_id, "status"].iloc[0], "BALLOTTAGGIO")
+            self.assertEqual(after.loc[after.id_fantacalcio == "9999", "note"].iloc[0], "keep")
+            self.assertLess(applied["audit"]["summary"]["issue_count"], before)
+            with self.assertRaises(SosFantaError):
+                apply_safe_updates(root, "profile", "2026/27", starters, listone, initial["content_hash"], initial["audit_hash"], lambda: None)
 
 
 if __name__ == "__main__":

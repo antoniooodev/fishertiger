@@ -184,6 +184,7 @@
 }
 
 .availability-badge {
+  margin-inline-start: var(--s-2);
   flex: 0 0 auto;
   border: 1px solid currentColor;
   border-radius: var(--r-pill);
