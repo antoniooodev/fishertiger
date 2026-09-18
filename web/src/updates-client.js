@@ -119,6 +119,8 @@ export const checkPlayerList = (profile, options) => updateRequest("player-list"
 export const getPlayerListStatus = (profile, options) => updateRequest("player-list", "status", profile, options);
 export const applyPlayerList = (profile, candidateHash, profileHash, activeHash, startersHash, options = {}) =>
   updateRequest("player-list", "apply", profile, { ...options, candidateHash, profileHash, activeHash, startersHash });
+export const getInjuryStatus = (profile, options) => updateRequest("injuries", "status", profile, options);
+export const checkInjuries = (profile, options) => updateRequest("injuries", "check", profile, options);
 
 export const uploadPlayerListCandidate = async (file, profile, { apiBase = "", fetchImpl = globalThis.fetch } = {}) => {
   const years = seasonParts(profile?.season?.season);

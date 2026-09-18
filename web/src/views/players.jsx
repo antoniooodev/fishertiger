@@ -563,6 +563,18 @@ export function PlayerDetail({
         </span>
       </div>
 
+      {player.availability_overlay?.effective ? (
+        <div className={`notice notice--${player.availability_overlay.effective === "OUT" ? "stop" : "warn"}`}>
+          <b>{player.availability_overlay.effective === "OUT" ? "Indisponibile" : "In dubbio"}</b>
+          <p style={{ marginTop: 4 }}>
+            {player.availability_overlay.automatic?.reason || "Override manuale locale"}
+            {player.availability_overlay.automatic
+              ? ` · Fonte API-Football${player.availability_overlay.checkedAt ? ` · aggiornata ${player.availability_overlay.checkedAt.slice(0, 16).replace("T", " ")}` : ""}`
+              : ""}
+          </p>
+        </div>
+      ) : null}
+
       {auction ? <LiveAuctionPanel player={player} {...auction} /> : null}
 
       <label className="field" htmlFor="player-note">

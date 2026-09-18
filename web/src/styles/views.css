@@ -178,6 +178,24 @@
   grid-column: 1 / -1;
 }
 
+.injury-manager-row .select {
+  width: 100%;
+  max-width: 12rem;
+}
+
+.availability-badge {
+  flex: 0 0 auto;
+  border: 1px solid currentColor;
+  border-radius: var(--r-pill);
+  padding: 1px 5px;
+  font: 800 var(--fs-2xs) var(--font-num);
+  letter-spacing: .04em;
+}
+
+.availability-badge--out { color: var(--c-stop); }
+.availability-badge--questionable { color: var(--c-warn); }
+.availability-context { color: var(--c-text-dim); font-size: var(--fs-xs); }
+
 .injury-list-empty {
   padding: var(--s-4);
   border: 1px dashed var(--c-line);

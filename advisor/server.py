@@ -30,6 +30,13 @@ from .generate import (
 from .freshness import dataset_configuration_hash, simulation_configuration_hash, source_fingerprints
 from .league_calendar import build_legacy_calendar_template, preprocess_legacy_calendar
 from .simulation import RosterValidationError
+from .injury_updates import (
+    FetchJson as InjuryFetchJson,
+    InjuryUpdateError,
+    check_updates as check_injury_updates,
+    fetch_json as fetch_injury_json,
+    stored_status as stored_injury_status,
+)
 from .player_list_updates import (
     FetchPage as PlayerListFetchPage,
     PlayerListUpdateError,
@@ -128,6 +135,8 @@ class LocalApiServer(ThreadingHTTPServer):
         set_piece_fetcher: FetchPage = fetch_page,
         goalkeeper_fetcher: FetchPage = fetch_page,
         player_list_fetcher: PlayerListFetchPage = fetch_public_page,
+        injury_fetcher: InjuryFetchJson = fetch_injury_json,
+        injury_api_key: str | None = None,
     ) -> None:
         self.profiles_dir = Path(profiles_dir)
         self.datasets_dir = Path(datasets_dir)
@@ -142,6 +151,8 @@ class LocalApiServer(ThreadingHTTPServer):
         self.set_piece_fetcher = set_piece_fetcher
         self.goalkeeper_fetcher = goalkeeper_fetcher
         self.player_list_fetcher = player_list_fetcher
+        self.injury_fetcher = injury_fetcher
+        self.injury_api_key = injury_api_key
         super().__init__(address, LocalApiHandler)
 
     def handle_error(self, request: Any, client_address: Any) -> None:
@@ -193,6 +204,12 @@ class LocalApiHandler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.NOT_FOUND, "not_found", "The requested endpoint does not exist.")
 
     def do_POST(self) -> None:
+        if self._path() == "/api/updates/injuries/status":
+            self._injury_status()
+            return
+        if self._path() == "/api/updates/injuries/check":
+            self._check_injury_updates()
+            return
         if self._path() == "/api/updates/player-list/check":
             self._check_player_list_updates()
             return
@@ -630,6 +647,61 @@ class LocalApiHandler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "storage_error", "The update snapshot could not be stored.")
             return
         self._send_json(HTTPStatus.OK, result)
+
+    def _injury_status(self) -> None:
+        request = self._injury_request()
+        if request is None:
+            return
+        profile = request
+        try:
+            result = stored_injury_status(
+                self.server.updates_dir,
+                profile.profile_id,
+                profile.season.season,
+                api_key=self.server.injury_api_key,
+            )
+        except InjuryUpdateError as error:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "snapshot_unavailable", str(error))
+            return
+        self._send_json(HTTPStatus.OK, result)
+
+    def _check_injury_updates(self) -> None:
+        profile = self._injury_request()
+        if profile is None:
+            return
+        try:
+            result = check_injury_updates(
+                self.server.updates_dir,
+                profile,
+                self.server.injury_fetcher,
+                api_key=self.server.injury_api_key,
+            )
+        except InjuryUpdateError as error:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "injury_update_unavailable", str(error))
+            return
+        self._send_json(HTTPStatus.OK, result)
+
+    def _injury_request(self) -> Any | None:
+        request = self._update_request()
+        if request is None:
+            return None
+        requested = request[0]
+        try:
+            stored_path = self.server.profiles_dir / f"{requested.profile_id}.json"
+            if stored_path.is_file():
+                return resolve_profile(
+                    {"profile_id": requested.profile_id},
+                    self.server.profiles_dir,
+                    profile_loader=self.server.profile_loader,
+                )
+            value = json.loads(self.server.default_profile_path.read_text(encoding="utf-8"))
+            default = self.server.profile_loader(value)
+            if default.profile_id != requested.profile_id:
+                raise ProfileRequestError("The active profile must be saved before checking injuries.")
+            return default
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError, ProfileRequestError) as error:
+            self._error(HTTPStatus.BAD_REQUEST, "invalid_profile", str(error))
+            return None
 
     def _sosfanta_status(self) -> None:
         request = self._update_request()
@@ -1069,9 +1141,11 @@ def create_server(
     set_piece_fetcher: FetchPage = fetch_page,
     goalkeeper_fetcher: FetchPage = fetch_page,
     player_list_fetcher: PlayerListFetchPage = fetch_public_page,
+    injury_fetcher: InjuryFetchJson = fetch_injury_json,
+    injury_api_key: str | None = None,
 ) -> LocalApiServer:
     """Create a local API server; inject a pipeline generator for tests or embedding."""
-    return LocalApiServer(address, profiles_dir=profiles_dir, datasets_dir=datasets_dir, uploads_dir=uploads_dir, updates_dir=updates_dir, default_profile_path=default_profile_path, generator=generator, simulator=simulator, profile_loader=profile_loader, update_fetcher=update_fetcher, formations_fetcher=formations_fetcher, set_piece_fetcher=set_piece_fetcher, goalkeeper_fetcher=goalkeeper_fetcher, player_list_fetcher=player_list_fetcher)
+    return LocalApiServer(address, profiles_dir=profiles_dir, datasets_dir=datasets_dir, uploads_dir=uploads_dir, updates_dir=updates_dir, default_profile_path=default_profile_path, generator=generator, simulator=simulator, profile_loader=profile_loader, update_fetcher=update_fetcher, formations_fetcher=formations_fetcher, set_piece_fetcher=set_piece_fetcher, goalkeeper_fetcher=goalkeeper_fetcher, player_list_fetcher=player_list_fetcher, injury_fetcher=injury_fetcher, injury_api_key=injury_api_key)
 
 
 def _simulate_current_dataset(profile: Any, output_dir: Path, iterations: int, seed: int, rosters: dict[str, list[int]] | None = None) -> dict[str, Any]:

@@ -28,6 +28,7 @@ import {
   uploadPlayerListCandidate,
   updateStateLabel,
 } from "./updates-client.js";
+import { injuryUpdateViewModel } from "./injury-state.js";
 
 const ROLE_LABELS = { P: "Portieri", D: "Difensori", C: "Centrocampisti", A: "Attaccanti" };
 const ActionIcon = ({ name }) => {
@@ -653,11 +654,107 @@ function GoalkeeperUpdates({ profile, apiBase }) {
   );
 }
 
+const INJURY_STATE_LABELS = {
+  unconfigured: "Non configurato",
+  never_checked: "Mai controllato",
+  fresh: "Cache aggiornata",
+  stale: "Cache scaduta",
+  unsupported: "Copertura non disponibile",
+  error: "Errore aggiornamento",
+};
+
+const ageLabel = (seconds) => {
+  if (!Number.isFinite(seconds)) return "Nessuna cache";
+  if (seconds < 60) return "meno di un minuto";
+  if (seconds < 3600) return `${Math.round(seconds / 60)} min`;
+  return `${Math.round(seconds / 3600)} h`;
+};
+
+export function InjuryUpdates({ injuryState }) {
+  const [busy, setBusy] = useState(false);
+  const status = injuryState.status;
+  const snapshot = status.snapshot;
+  const view = injuryUpdateViewModel(status);
+  const groups = {
+    OUT: view.out,
+    QUESTIONABLE: view.questionable,
+  };
+  const refresh = async () => {
+    setBusy(true);
+    try {
+      await injuryState.refresh();
+    } catch {
+      /* Central state keeps the cached snapshot and exposes the warning. */
+    } finally {
+      setBusy(false);
+    }
+  };
+  const rows = (players) => (
+    <div className="listone-entry-list injury-update-list">
+      {players.map((player) => (
+        <p key={`${player.provider_player_id}-${player.fixture_id || "fixture"}`}>
+          <strong>{player.role ? `${player.role} · ` : ""}{player.fantacalcio_name}</strong>
+          <span>{player.fantacalcio_team} · {player.provider_type} · {player.reason || "Motivo non indicato"}</span>
+        </p>
+      ))}
+    </div>
+  );
+
+  return (
+    <article className="update-source-card injury-update-card">
+      <header>
+        <div><span className="source-index">06</span><h2>Disponibilità Serie A</h2></div>
+        <span className={`update-state ${status.state}`}>{INJURY_STATE_LABELS[status.state]}</span>
+      </header>
+      <div className="update-source-meta">
+        <div><span>Fonte</span><strong>API-Football</strong></div>
+        <div><span>Ultimo controllo riuscito</span><strong>{snapshot?.checked_at?.slice(0, 16).replace("T", " ") || "Mai"}</strong></div>
+        <div><span>Età cache</span><strong>{ageLabel(status.cacheAgeSeconds)}</strong></div>
+      </div>
+      <div className="update-actions">
+        <button className="update-check-button" type="button" onClick={refresh} disabled={busy || !status.configured}>
+          <ActionIcon name="refresh" />
+          <span>{busy ? "Aggiornamento..." : "Aggiorna ora"}</span>
+        </button>
+      </div>
+      {view.unconfiguredMessage ? (
+        <p className="update-message">{view.unconfiguredMessage}</p>
+      ) : null}
+      {view.warningMessage ? (
+        <p className="update-message error" role="alert">
+          {view.warningMessage}
+        </p>
+      ) : null}
+      <div className="update-summary">
+        <span>DISPONIBILITÀ RISOLTE</span>
+        <strong>{groups.OUT.length} OUT · {groups.QUESTIONABLE.length} DUBBIO</strong>
+        <p>{view.unresolved.length} identità non risolte</p>
+      </div>
+      {groups.OUT.length ? <details className="injury-update-details"><summary>OUT <b>{groups.OUT.length}</b></summary>{rows(groups.OUT)}</details> : null}
+      {groups.QUESTIONABLE.length ? <details className="injury-update-details"><summary>QUESTIONABLE <b>{groups.QUESTIONABLE.length}</b></summary>{rows(groups.QUESTIONABLE)}</details> : null}
+      {view.unresolved.length ? (
+        <details className="injury-update-details">
+          <summary>Identità non risolte <b>{view.unresolved.length}</b></summary>
+          <div className="listone-entry-list injury-update-list">
+            {view.unresolved.map((player, index) => (
+              <p key={`${player.provider_player_id}-${index}`}>
+                <strong>{player.provider_player_name}</strong>
+                <span>{player.provider_team_name} · {player.match_failure}</span>
+              </p>
+            ))}
+          </div>
+        </details>
+      ) : null}
+    </article>
+  );
+}
+
 export function Updates({
   profile,
   apiBase = "",
   onPlayerListApplyStart,
   onPlayerListApplied,
+  injuryState,
 }) {
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState("");
@@ -833,6 +930,8 @@ export function Updates({
         onApplyStart={onPlayerListApplyStart}
         onApplied={onPlayerListApplied}
       />
+
+      <InjuryUpdates injuryState={injuryState} />
 
       <aside className="update-method-note">
         <strong>Metodo</strong>

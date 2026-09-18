@@ -8,6 +8,8 @@ import {
   checkSosFantaFormations,
   checkSosFantaSetPieces,
   checkSosFantaGoalkeepers,
+  checkInjuries,
+  getInjuryStatus,
   fantacalcioDownloadUrl,
   fetchSosFantaFormationBundle,
   sosFantaFormationsUrl,
@@ -67,6 +69,21 @@ test("uses the SOS Fanta goalkeeper provider endpoint", async () => {
     fetchImpl: async (url) => { requestUrl = url; return { ok: true, status: 200, json: async () => ({ state: "unchanged" }) }; },
   });
   assert.equal(requestUrl, "/api/updates/sosfanta-goalkeepers/check");
+});
+
+test("keeps API-Football status and refresh behind backend endpoints", async () => {
+  const urls = [];
+  const fetchImpl = async (url) => {
+    urls.push(url);
+    return { ok: true, status: 200, json: async () => ({ state: "fresh" }) };
+  };
+  await getInjuryStatus({ profile_id: "league" }, { fetchImpl });
+  await checkInjuries({ profile_id: "league" }, { fetchImpl });
+  assert.deepEqual(urls, [
+    "/api/updates/injuries/status",
+    "/api/updates/injuries/check",
+  ]);
+  assert.equal(urls.some((url) => url.includes("api-sports.io")), false);
 });
 
 test("maps profile seasons to official Fantacalcio downloads", () => {
