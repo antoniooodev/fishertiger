@@ -15,6 +15,7 @@ import pandas as pd
 from bs4 import BeautifulSoup, Tag
 
 from .pipeline import load_identity_overrides, match_manual
+from .player_identity import audit_titolari_identities
 from .sosfanta_updates import MAX_PAGE_BYTES, SosFantaError, fetch_page
 
 
@@ -350,6 +351,10 @@ def audit_starters(snapshot: dict[str, object], starters_path: Path, player_list
         raise SosFantaError("The SOS Fanta formations snapshot is invalid.")
     snapshot = _validate_snapshot(snapshot, str(snapshot.get("season", "")))
     starters, listone, canonical_starters, canonical_listone = _load_audit_sources(starters_path, player_list_path)
+    try:
+        ceduti = pd.read_excel(player_list_path, sheet_name="Ceduti", header=1)
+    except Exception as error:
+        raise SosFantaError("The Fantacalcio Ceduti sheet is unavailable or invalid.") from error
     article_rows: list[dict[str, object]] = []
     for team in snapshot["teams"]:
         for slot in team["slots"]:
@@ -418,10 +423,20 @@ def audit_starters(snapshot: dict[str, object], starters_path: Path, player_list
             findings.append({"issue": "missing_row", **details, "current_status": None})
             continue
         if len(row_indexes) > 1:
-            current_names = [starters.iloc[row_index].nome for row_index in row_indexes]
+            duplicate_rows = [
+                {
+                    "row": int(row_index) + 2, "name": starters.iloc[row_index].nome,
+                    "id_fantacalcio": starters.iloc[row_index].id_fantacalcio or None,
+                    "team": starters.iloc[row_index].squadra, "status": starters.iloc[row_index].status,
+                    "note": starters.iloc[row_index].note,
+                }
+                for row_index in row_indexes
+            ]
             findings.append({
                 "issue": "duplicate_row", **details, "current_status": None,
-                "current_name": ", ".join(current_names), "row_count": len(row_indexes),
+                "current_name": ", ".join(row["name"] for row in duplicate_rows),
+                "row_count": len(row_indexes), "duplicate_rows": duplicate_rows,
+                "merge_safe": False, "merge_reason": "At least one row depends on a fuzzy identity match.",
             })
             continue
         current_row = starters.iloc[row_indexes[0]]
@@ -432,6 +447,7 @@ def audit_starters(snapshot: dict[str, object], starters_path: Path, player_list
             findings.append({
                 "issue": "status_mismatch", **details,
                 "current_status": current_status, "current_name": current_row.nome,
+                "current_csv_row": int(row_indexes[0]) + 2,
             })
         else:
             corroborated += 1
@@ -452,6 +468,7 @@ def audit_starters(snapshot: dict[str, object], starters_path: Path, player_list
             "player_list": {"path": str(player_list_path.resolve()), "sha256": _file_sha256(player_list_path)},
         },
         "findings": findings,
+        "identity_audit": audit_titolari_identities(starters_path, listone, ceduti, overrides=overrides),
         "resolved_identities": resolved,
         "current_rows": canonical_starters,
     }
@@ -471,6 +488,7 @@ def _response(season: str, accepted: dict[str, object] | None, latest: dict[str,
             "summary": audit["summary"],
             "sources": audit["sources"],
             "findings": audit["findings"],
+            "identity_audit": audit["identity_audit"],
         },
         "audit_hash": audit["audit_hash"], "bundle_available": bundle_available,
     }
@@ -570,8 +588,16 @@ def apply_safe_updates(root: Path, profile_id: str, season: str, starters_path: 
                 continue
             player_id = str(finding["id_fantacalcio"])
             indexes = frame.index[frame.id_fantacalcio.eq(player_id)].tolist()
-            if finding["issue"] == "status_mismatch" and len(indexes) == 1:
-                index, action = indexes[0], "update"
+            if finding["issue"] == "status_mismatch":
+                if len(indexes) == 1:
+                    index = indexes[0]
+                elif finding.get("current_csv_row"):
+                    index = int(finding["current_csv_row"]) - 2
+                    if frame.at[index, "nome"] != finding.get("current_name") or frame.at[index, "squadra"] != finding["team"]:
+                        continue
+                else:
+                    continue
+                action = "update"
             elif finding["issue"] == "missing_row" and not indexes:
                 row = {column: "" for column in frame.columns}
                 row.update({"squadra": finding["team"], "nome": finding["name"], "id_fantacalcio": player_id})

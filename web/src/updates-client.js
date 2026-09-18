@@ -93,6 +93,7 @@ export const checkSosFantaFormations = (profile, options) => updateRequest("sosf
 export const getSosFantaFormationStatus = (profile, options) => updateRequest("sosfanta-formations", "status", profile, options);
 export const acceptSosFantaFormations = (profile, options) => updateRequest("sosfanta-formations", "accept", profile, options);
 export const applySosFantaFormations = (profile, options) => updateRequest("sosfanta-formations", "apply", profile, options);
+export const repairSosFantaFormationIdentities = (profile, options) => updateRequest("sosfanta-formations", "repair-identities", profile, options);
 export const fetchSosFantaFormationBundle = (profile, options) => updateRequest("sosfanta-formations", "bundle", profile, options);
 export const checkSosFantaSetPieces = (profile, options) => updateRequest("sosfanta-set-pieces", "check", profile, options);
 export const getSosFantaSetPieceStatus = (profile, options) => updateRequest("sosfanta-set-pieces", "status", profile, options);

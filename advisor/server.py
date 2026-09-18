@@ -47,9 +47,11 @@ from .player_list_updates import (
     persisted_or_inline_profile,
     profile_transaction,
     public_check,
+    read_player_list,
     season_slug,
     store_candidate,
 )
+from .player_identity import apply_safe_id_repairs
 from .sosfanta_updates import (
     FetchPage,
     SosFantaError,
@@ -244,6 +246,9 @@ class LocalApiHandler(BaseHTTPRequestHandler):
             return
         if self._path() == "/api/updates/sosfanta-formations/apply":
             self._apply_formation_updates()
+            return
+        if self._path() == "/api/updates/sosfanta-formations/repair-identities":
+            self._repair_formation_identities()
             return
         if self._path() == "/api/updates/sosfanta-goalkeepers/check":
             self._check_goalkeeper_updates()
@@ -871,6 +876,35 @@ class LocalApiHandler(BaseHTTPRequestHandler):
         except Exception:
             traceback.print_exc(file=sys.stderr)
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "generation_failed", "The safe formation update could not be completed.")
+            return
+        self._send_json(HTTPStatus.OK, result)
+
+    def _repair_formation_identities(self) -> None:
+        request = self._update_request()
+        if request is None:
+            return
+        profile, _, _, _, source_hash = request
+        profile = self._derive_calendar_participants(profile)
+        paths = self._formation_source_paths(profile)
+        if paths is None:
+            return
+        starters_path, listone_path = paths
+        original = starters_path.read_bytes()
+        try:
+            players, ceduti = read_player_list(listone_path)
+            result = apply_safe_id_repairs(starters_path, players, ceduti, source_hash)
+        except ValueError as error:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "update_unavailable", str(error))
+            return
+        try:
+            generate_dataset(profile, self.server.datasets_dir, generator=self.server.generator)
+        except Exception:
+            with tempfile.NamedTemporaryFile("wb", dir=starters_path.parent, delete=False) as handle:
+                handle.write(original)
+                rollback = Path(handle.name)
+            rollback.replace(starters_path)
+            traceback.print_exc(file=sys.stderr)
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "generation_failed", "The identity repair could not be completed.")
             return
         self._send_json(HTTPStatus.OK, result)
 

@@ -3,6 +3,7 @@ import {
   acceptSosFanta,
   acceptSosFantaFormations,
   applySosFantaFormations,
+  repairSosFantaFormationIdentities,
   acceptSosFantaSetPieces,
   applySosFantaGoalkeepers,
   applyPlayerList,
@@ -337,6 +338,7 @@ function FormationUpdates({ profile, apiBase }) {
   const auditSummary = result?.audit?.summary;
   const auditSources = result?.audit?.sources || {};
   const findings = result?.audit?.findings || [];
+  const identityAudit = result?.audit?.identity_audit;
 
   useEffect(() => {
     let active = true;
@@ -369,6 +371,12 @@ function FormationUpdates({ profile, apiBase }) {
         if (request !== sequence.current) return;
         setResult((current) => ({ ...current, ...next }));
         setMessage(`${next.applied_count} correzioni deterministiche applicate; audit rieseguito.`);
+      } else if (action === "repair-identities") {
+        await repairSosFantaFormationIdentities(profile, { apiBase, auditHash: identityAudit?.source_hash });
+        const next = await getSosFantaFormationStatus(profile, { apiBase });
+        if (request !== sequence.current) return;
+        setResult(next);
+        setMessage("Riparazioni ID deterministiche applicate; audit rieseguito.");
       } else {
         const next = await acceptSosFantaFormations(profile, { apiBase, contentHash: result?.content_hash });
         if (request !== sequence.current) return;
@@ -442,6 +450,12 @@ function FormationUpdates({ profile, apiBase }) {
              <span>{busy === "apply" ? "Applicazione..." : "Applica correzioni sicure"}</span>
            </button>
          )}
+         {identityAudit?.safe_repair_count > 0 && (
+           <button className="update-accept-button" onClick={() => run("repair-identities")} disabled={Boolean(busy)}>
+             <ActionIcon name="check" />
+             <span>{busy === "repair-identities" ? "Riparazione..." : `Applica ${identityAudit.safe_repair_count} riparazioni ID sicure`}</span>
+           </button>
+         )}
          {(result?.state === "baseline_missing" || result?.state === "changed") && (
            <button className="update-accept-button quiet" onClick={() => run("accept")} disabled={Boolean(busy)}>
              <ActionIcon name="check" />
@@ -499,6 +513,8 @@ function FormationUpdates({ profile, apiBase }) {
                 {finding.best_candidate && <p><strong>Miglior candidato</strong><span>{finding.best_candidate} · {finding.match_score}</span></p>}
                 {(finding.current_name || finding.source === "current_csv") && <p><strong>Nome CSV</strong><span>{finding.current_name || finding.name}</span></p>}
                 {finding.diagnostic && <p><strong>Diagnostica</strong><span>{finding.diagnostic}</span></p>}
+                {finding.duplicate_rows?.map((row) => <p key={row.row}><strong>Riga CSV {row.row}</strong><span>{row.name} · ID {row.id_fantacalcio || "-"} · {row.team} · {row.status} · {row.note || "nessuna nota"}</span></p>)}
+                {finding.merge_reason && <p><strong>Merge</strong><span>{finding.merge_reason}</span></p>}
                 {finding.formation_text && <p><strong>Formazione</strong><span>{finding.formation_text}</span></p>}
                 {finding.ballot_text && <p><strong>Ballottaggio</strong><span>{finding.ballot_text}</span></p>}
               </div>

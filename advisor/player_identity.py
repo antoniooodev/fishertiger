@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import tempfile
 import unicodedata
@@ -14,9 +15,12 @@ FUZZY_THRESHOLD = 90.0
 FUZZY_MARGIN = 7.0
 TEAM_ALIASES = {
     "ac milan": "milan", "ac monza": "monza", "acf fiorentina": "fiorentina",
-    "as roma": "roma", "hellas verona": "verona", "inter milan": "inter",
+    "as roma": "roma", "bologna fc": "bologna", "cagliari calcio": "cagliari",
+    "como 1907": "como", "genoa cfc": "genoa", "hellas verona": "verona", "inter milan": "inter",
     "internazionale": "inter", "internazionale milano": "inter", "ss lazio": "lazio",
-    "ssc napoli": "napoli", "udinese calcio": "udinese", "us lecce": "lecce",
+    "juventus fc": "juventus", "parma calcio 1913": "parma", "ssc napoli": "napoli",
+    "torino fc": "torino", "udinese calcio": "udinese", "us lecce": "lecce",
+    "us sassuolo calcio": "sassuolo",
 }
 
 
@@ -210,3 +214,93 @@ def backfill_titolari_ids(path: Path, listone: pd.DataFrame, *, overrides=None, 
     if report_path is not None:
         report_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return result
+
+
+def _file_hash(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def audit_titolari_identities(path: Path, listone: pd.DataFrame, ceduti: pd.DataFrame, *, overrides=None) -> dict[str, object]:
+    frame = pd.read_csv(path, dtype=str, keep_default_na=False)
+    active = listone.to_dict("records")
+    departed = ceduti.to_dict("records")
+    active_ids = {int(player["Id"]) for player in active}
+    ceduti_ids = {int(player["Id"]) for player in departed}
+    repairs, unresolved = [], []
+    valid = conflicts = confirmed_ceduti = 0
+    for index, row in frame.iterrows():
+        row_number = int(index) + 2
+        old_id = int(row.id_fantacalcio) if str(row.id_fantacalcio).isdigit() else None
+        result = resolve_player(row.nome, row.squadra, active, source="titolari", existing_id=row.id_fantacalcio, overrides=overrides)
+        if row.id_fantacalcio and result["matched"]:
+            valid += 1
+            continue
+        if old_id in ceduti_ids:
+            departed_result = resolve_player(row.nome, row.squadra, departed, source="titolari-ceduti", existing_id=old_id)
+            if departed_result["matched"]:
+                confirmed_ceduti += 1
+                repairs.append({
+                    "row": row_number, "source_name": row.nome, "team": row.squadra, "old_id": old_id,
+                    "proposed_canonical_id": None, "canonical_player_name": departed_result["player"]["Nome"],
+                    "resolution_method": "ceduti_existing_id", "confidence": 100.0,
+                    "reason": "confirmed_ceduto", "safe": False,
+                })
+                unresolved.append({"row": row_number, "source_name": row.nome, "team": row.squadra, "old_id": old_id, "classification": "confirmed_ceduto", "canonical_player_name": departed_result["player"]["Nome"]})
+                continue
+        if row.id_fantacalcio:
+            conflicts += 1
+            proposed = resolve_player(row.nome, row.squadra, active, source="titolari", overrides=overrides)
+            repair = {
+                "row": row_number, "source_name": row.nome, "team": row.squadra, "old_id": old_id,
+                "proposed_canonical_id": int(proposed["player"]["Id"]) if proposed["matched"] else None,
+                "canonical_player_name": proposed["player"]["Nome"] if proposed["matched"] else proposed.get("best_candidate"),
+                "resolution_method": proposed.get("method"), "confidence": proposed.get("score", proposed.get("best_score", 0.0)),
+                "reason": "replacement_candidate" if proposed["matched"] else proposed["reason"],
+                "safe": proposed.get("method") in {"exact", "safe_variant"},
+            }
+            repairs.append(repair)
+            continue
+        departed_result = resolve_player(row.nome, row.squadra, departed, source="titolari-ceduti")
+        if departed_result["matched"] and departed_result.get("method") in {"exact", "safe_variant"}:
+            confirmed_ceduti += 1
+            classification = "confirmed_ceduto"
+            details = {"canonical_player_name": departed_result["player"]["Nome"], "ceduto_id": int(departed_result["player"]["Id"])}
+        elif result["matched"] or departed_result["matched"]:
+            candidate = result if result["matched"] else departed_result
+            classification = "fuzzy_candidate_requires_confirmation"
+            details = {"best_candidate": candidate["player"]["Nome"], "best_score": candidate.get("score", 0.0), "candidate_id": int(candidate["player"]["Id"])}
+        elif result["reason"] == "ambiguous":
+            classification, details = "ambiguous", result
+        elif result.get("best_candidate"):
+            classification, details = "fuzzy_candidate_requires_confirmation", result
+        elif result["reason"] == "player_not_in_active_listone":
+            classification, details = "player_not_in_active_listone", result
+        else:
+            classification, details = "no_candidate", result
+        unresolved.append({"row": row_number, "source_name": row.nome, "team": row.squadra, "old_id": None, "classification": classification, **details})
+    return {
+        "source_hash": _file_hash(path), "total": len(frame), "valid_ids": valid, "missing_ids": int((frame.id_fantacalcio == "").sum()),
+        "conflicting_ids": conflicts, "confirmed_ceduti": confirmed_ceduti,
+        "fuzzy_requiring_confirmation": sum(item["classification"] == "fuzzy_candidate_requires_confirmation" for item in unresolved),
+        "safe_repair_count": sum(item["safe"] for item in repairs), "repairs": repairs, "unresolved": unresolved,
+        "active_id_count": len(active_ids),
+    }
+
+
+def apply_safe_id_repairs(path: Path, listone: pd.DataFrame, ceduti: pd.DataFrame, expected_hash: str, *, overrides=None) -> dict[str, object]:
+    audit = audit_titolari_identities(path, listone, ceduti, overrides=overrides)
+    if not expected_hash or audit["source_hash"] != expected_hash:
+        raise ValueError("titolari.csv changed after review")
+    safe = {item["row"] - 2: item for item in audit["repairs"] if item["safe"]}
+    if not safe:
+        raise ValueError("the reviewed audit contains no safe ID repairs")
+    frame = pd.read_csv(path, dtype=str, keep_default_na=False)
+    for index, repair in safe.items():
+        if frame.at[index, "id_fantacalcio"] != str(repair["old_id"]):
+            raise ValueError("titolari.csv changed after review")
+        frame.at[index, "id_fantacalcio"] = str(repair["proposed_canonical_id"])
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", newline="", dir=path.parent, delete=False) as handle:
+        frame.to_csv(handle, index=False, lineterminator="\n")
+        temporary = Path(handle.name)
+    temporary.replace(path)
+    return {"applied": len(safe), "audit": audit_titolari_identities(path, listone, ceduti, overrides=overrides)}

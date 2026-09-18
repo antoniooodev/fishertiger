@@ -10,6 +10,7 @@ import {
   checkSosFantaGoalkeepers,
   checkInjuries,
   checkAllUpdateSources,
+  repairSosFantaFormationIdentities,
   getInjuryStatus,
   fantacalcioDownloadUrl,
   fetchSosFantaFormationBundle,
@@ -178,6 +179,16 @@ test("accepts a SOS Fanta formations source snapshot", async () => {
   };
   await acceptSosFantaFormations({ profile_id: "test" }, { fetchImpl, contentHash: "content" });
   assert.equal(requestUrl, "/api/updates/sosfanta-formations/accept");
+});
+
+test("sends the reviewed titolari hash for safe identity repairs", async () => {
+  let request;
+  await repairSosFantaFormationIdentities({ profile_id: "test" }, {
+    auditHash: "reviewed-source-hash",
+    fetchImpl: async (url, options) => { request = { url, body: JSON.parse(options.body) }; return { ok: true, status: 200, json: async () => ({ applied: 1 }) }; },
+  });
+  assert.equal(request.url, "/api/updates/sosfanta-formations/repair-identities");
+  assert.equal(request.body.audit_hash, "reviewed-source-hash");
 });
 
 test("normalizes network and invalid response failures", async () => {

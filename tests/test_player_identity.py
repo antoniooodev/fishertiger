@@ -2,7 +2,10 @@ import json
 
 import pandas as pd
 
-from advisor.player_identity import backfill_titolari_ids, load_identity_overrides, resolve_player
+from advisor.player_identity import (
+    apply_safe_id_repairs, audit_titolari_identities, backfill_titolari_ids,
+    load_identity_overrides, normalize_team, resolve_player,
+)
 
 
 PLAYERS = [
@@ -68,3 +71,35 @@ def test_titolari_backfill_is_safe_atomic_and_preserves_other_fields(tmp_path):
     assert rows.loc[2, "gerarchia_portiere"] == "PRIMO"
     assert rows.loc[0, "note"] == "keep"
     assert result["conflicts"] == 1 and not list(tmp_path.glob("tmp*"))
+
+
+def test_provider_team_aliases_are_a_conservative_superset():
+    assert [normalize_team(value) for value in (
+        "Bologna FC", "Cagliari Calcio", "Como 1907", "Genoa CFC", "Juventus FC",
+        "Parma Calcio 1913", "Torino FC", "US Sassuolo Calcio",
+    )] == ["bologna", "cagliari", "como", "genoa", "juventus", "parma", "torino", "sassuolo"]
+
+
+def test_identity_cleanup_proposes_and_atomically_applies_only_safe_repairs(tmp_path):
+    path = tmp_path / "titolari.csv"
+    pd.DataFrame([
+        {"squadra": "Inter", "nome": "Martinez Jose", "id_fantacalcio": "1", "status": "TITOLARE", "note": "keep"},
+        {"squadra": "Roma", "nome": "Ceduto C.", "id_fantacalcio": "", "status": "RISERVA", "note": "gone"},
+        {"squadra": "Milan", "nome": "Rossi", "id_fantacalcio": "", "status": "BALLOTTAGGIO", "note": "review"},
+    ]).to_csv(path, index=False)
+    active = pd.DataFrame(PLAYERS[:4])
+    ceduti = pd.DataFrame([PLAYERS[4]])
+    audit = audit_titolari_identities(path, active, ceduti)
+    assert audit["safe_repair_count"] == 1
+    assert audit["unresolved"][0]["classification"] == "confirmed_ceduto"
+    assert audit["unresolved"][1]["classification"] == "ambiguous"
+    result = apply_safe_id_repairs(path, active, ceduti, audit["source_hash"])
+    rows = pd.read_csv(path, dtype=str, keep_default_na=False)
+    assert result["applied"] == 1 and rows.loc[0, "id_fantacalcio"] == "2"
+    assert rows.loc[0, "note"] == "keep" and rows.loc[2, "id_fantacalcio"] == ""
+    try:
+        apply_safe_id_repairs(path, active, ceduti, audit["source_hash"])
+    except ValueError as error:
+        assert "changed after review" in str(error)
+    else:
+        raise AssertionError("stale source hash was accepted")
