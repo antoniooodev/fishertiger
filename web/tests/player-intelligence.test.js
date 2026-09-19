@@ -10,7 +10,7 @@ const status = {
     { fantacalcio_id: 1, matchday: 1, did_not_enter: true, vote_fc: { state: "unpublished", value: null } },
   ] },
   market: { players: [{ fantacalcio_id: 1, ownership_pct: 17.2, ownership_delta_7d: -2.9, price_cohort_compatible: true, market_source_date: "2026-09-18", price_source_date: "2026-09-17", market_price_cohort: { teams: 8, credits: 500 }, market_price: { value: 71.62, fallback_previous_season: true, price_season: "2025/26" } }] },
-  lineups: { matchday: 4, players: [{ fantacalcio_id: 1, matchday: 4, weighted_pct: 69, fc_pct: 60, gaz_pct: 90, sos_pct: null, sky_pct: 90, source_count: 3 }] },
+  lineups: { matchday: 4, players: [{ fantacalcio_id: 1, matchday: 4, fixture_state: "upcoming", weighted_pct: 69, fc_pct: 60, gaz_pct: 90, sos_pct: null, sky_pct: 90, source_count: 3 }] },
 };
 
 test("builds current performance, market cohort and next-matchday source detail", () => {
@@ -28,6 +28,15 @@ test("builds current performance, market cohort and next-matchday source detail"
 test("does not expose a stale previous-round lineup for an empty upcoming round", () => {
   const stale = { ...status, lineups: { matchday: 5, active_source_count: 0, evaluated_players: 0, players: [{ ...status.lineups.players[0], matchday: 4 }] } };
   assert.equal(p1PlayerViewModel(stale, 1).lineup, null);
+});
+
+test("shows only the player whose fixture is still upcoming in a partially completed round", () => {
+  const partial = { ...status, lineups: { matchday: 4, players: [
+    { ...status.lineups.players[0], fantacalcio_id: 1, fixture_state: "completed" },
+    { ...status.lineups.players[0], fantacalcio_id: 2, fixture_state: "upcoming" },
+  ] } };
+  assert.equal(p1PlayerViewModel(partial, 1).lineup, null);
+  assert.equal(p1PlayerViewModel(partial, 2).lineup.weighted_pct, 69);
 });
 
 test("keeps s.v., unpublished and absence distinct", () => {

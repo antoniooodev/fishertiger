@@ -726,8 +726,8 @@ export function PlayerIntelligence({ intelligence }) {
       {market ? <dl className="p1-facts">
         <dt>Comprato da</dt><dd>{Number.isFinite(market.ownership_pct) ? `${market.ownership_pct.toFixed(1)}%` : "campione insufficiente"}</dd>
         <dt>7 giorni</dt><dd>{Number.isFinite(market.ownership_delta_7d) ? `${market.ownership_delta_7d >= 0 ? "+" : ""}${market.ownership_delta_7d.toFixed(1)} pp` : "—"}</dd>
-        <dt>{compatible ? "Prezzo mercato" : "Benchmark FCO"}</dt><dd>{Number.isFinite(price?.value) ? price.value.toFixed(2) : market.new_player ? "Nuovo" : "—"}</dd>
-        <dt>{compatible ? "Cohort" : "Benchmark FCO"}</dt><dd>{cohort?.teams} squadre / {cohort?.credits}</dd>
+        <dt>{compatible ? "Prezzo mercato" : "Benchmark FCO"}</dt><dd>{cohort ? (Number.isFinite(price?.value) ? price.value.toFixed(2) : market.new_player ? "Nuovo" : "—") : "Nessun benchmark singolo"}</dd>
+        {cohort && <><dt>{compatible ? "Cohort" : "Benchmark FCO"}</dt><dd>{cohort.teams} squadre / {cohort.credits}</dd></>}
         {!compatible && <><dt>La tua lega</dt><dd>{market.active_league?.participants} squadre / {market.active_league?.credits} crediti</dd><dt>Confrontabilità</dt><dd>Non direttamente comparabile</dd></>}
         <dt>Ownership updated</dt><dd>{market.market_source_date}</dd>
         <dt>Prices updated</dt><dd>{market.price_source_date}</dd>
@@ -735,7 +735,7 @@ export function PlayerIntelligence({ intelligence }) {
       </dl> : <p className="micro">Mercato non ancora disponibile.</p>}
     </section>
     <section>
-      <div className="section-head"><h2>Prossima giornata</h2></div>
+      <div className="section-head"><h2>Prossima partita</h2></div>
       {lineup ? <>
         <p className="p1-lineup-head"><b>{lineup.opponent} · {lineup.venue === "HOME" ? "casa" : "trasferta"}</b><strong>{Number.isFinite(lineup.weighted_pct) ? `${lineup.weighted_pct}%` : "—"}</strong></p>
         <div className="p1-sources">{sources.map(([label, value]) => <span key={label}><small>{label}</small><b>{Number.isFinite(value) ? value : "—"}</b></span>)}</div>

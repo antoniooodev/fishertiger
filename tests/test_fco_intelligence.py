@@ -6,6 +6,7 @@ import pytest
 from advisor.fco_intelligence import (
     FcoIntelligenceError,
     _audit_performance,
+    _benchmark_cohort,
     _check_performance,
     _price_cohort,
     _require_unique_canonical,
@@ -132,6 +133,7 @@ def test_lineups_sources_weighted_sections_and_official(lineups_html):
     starter, bench, unavailable = parsed["rows"][:3]
     assert len(parsed["fixtures"]) == 10 and len(parsed["rows"]) == 60
     assert starter["section"] == "probable_starter" and starter["weighted_pct"] == 69 and starter["sos_pct"] is None and starter["source_count"] == 3 and starter["official_confirmed"]
+    assert starter["fixture_state"] == "upcoming" and starter["fixture_status"] == "Non iniziata"
     assert bench["section"] == "probable_bench" and unavailable["section"] == "unavailable" and unavailable["weighted_pct"] is None
     fewer = lineups_html.replace("4 redazioni su 4", "3 redazioni su 4", 1)
     assert parse_lineups(fewer, SEASON, 5)["active_source_count"] == 3
@@ -161,12 +163,28 @@ def test_cumulative_cross_check_discrepancy(tmp_path):
     rows = parse_cumulative(cumulative_html(), SEASON)
     players = [{"Id": 1, "Nome": "Malen", "Squadra": "Roma", "R": "A"}]
     directory = tmp_path / "performance-v1"
-    snapshot = {"event_availability": {"assists": True}, "players": [{"fantacalcio_id": 1, "assists": 1}]}
+    snapshot = {"state": "final", "event_availability": {"assists": True}, "players": [{"fantacalcio_id": 1, "assists": 1}]}
     path = directory / "matchdays" / "01.json"
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps(snapshot))
     audit = _audit_performance(directory, rows, players)
-    assert audit["discrepancies"] == [{"fantacalcio_id": 1, "canonical_name": "Malen", "canonical_team": "Roma", "metric": "assists", "matchdays": 1, "cumulative": 2}]
+    assert audit["discrepancies"] == [{"fantacalcio_id": 1, "canonical_name": "Malen", "canonical_team": "Roma", "metric": "assists", "final_matchday_total": 1, "matchdays": 1, "cumulative": 2}]
+
+
+def test_cumulative_audit_separates_provisional_sync(tmp_path):
+    players = [{"Id": 1, "Nome": "Malen", "Squadra": "Roma", "R": "A"}]
+    directory = tmp_path / "performance-v1"
+    matchdays = directory / "matchdays"
+    matchdays.mkdir(parents=True)
+    base = {"event_availability": {"assists": True}, "players": [{"fantacalcio_id": 1, "assists": 1}]}
+    (matchdays / "01.json").write_text(json.dumps({**base, "state": "final", "matchday": 1}))
+    (matchdays / "02.json").write_text(json.dumps({**base, "state": "provisional", "matchday": 2}))
+    audit = _audit_performance(directory, parse_cumulative(cumulative_html(1), SEASON), players)
+    assert audit["discrepancies"] == []
+    assert audit["pending_sync"][0] == {"fantacalcio_id": 1, "canonical_name": "Malen", "canonical_team": "Roma", "metric": "assists", "final_matchday_total": 1, "provisional_addition": 1, "cumulative": 1, "provisional_matchdays": [2]}
+    (matchdays / "02.json").write_text(json.dumps({**base, "state": "final", "matchday": 2}))
+    assert len(_audit_performance(directory, parse_cumulative(cumulative_html(1), SEASON), players)["discrepancies"]) == 1
+    assert _audit_performance(directory, parse_cumulative(cumulative_html(2), SEASON), players)["discrepancies"] == []
 
 
 def test_unresolved_identity_and_final_revision_are_traceable(tmp_path, performance_html):
@@ -199,6 +217,9 @@ def test_price_cohorts_are_explicit_not_nearest():
     assert _price_cohort(9, 440)[0]["field"] == "price_10_500"
     assert _price_cohort(8, 750)[0] is None
     assert "750 credits" in _price_cohort(8, 750)[1]
+    assert _benchmark_cohort(8)["field"] == "price_8_500"
+    assert _benchmark_cohort(10)["field"] == "price_10_500"
+    assert _benchmark_cohort(12) is None
 
 
 @pytest.mark.parametrize("source", ["market snapshot", "performance matchday 4", "lineup probability snapshot"])

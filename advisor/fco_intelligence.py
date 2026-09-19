@@ -151,6 +151,17 @@ EVENT_PATTERNS = {
 }
 
 
+def _fixture_state(status: str) -> str:
+    value = normalize(status)
+    if value == "terminata":
+        return "completed"
+    if value == "non iniziata":
+        return "upcoming"
+    if any(label in value for label in ("in corso", "intervallo", "primo tempo", "secondo tempo")):
+        return "in_progress"
+    return "other"
+
+
 def _event_titles(node: object) -> list[str]:
     return [str(item.get("data-original-title") or item.get("title") or "").strip() for item in node.select("[data-original-title], [title]")]
 
@@ -348,6 +359,7 @@ def parse_lineups(html: str, season: str, matchday: int) -> dict[str, object]:
             teams.add(team)
             venue = "HOME" if team == fixture["home_team"] else "AWAY"
             opponent = fixture["away_team"] if venue == "HOME" else fixture["home_team"]
+            fixture_context = {"fixture_state": _fixture_state(str(fixture["status"])), "fixture_status": fixture["status"]}
             for table in section.select("table"):
                 caption = normalize(_text(table.select_one("caption")))
                 if "probabili titolari" in caption:
@@ -367,7 +379,7 @@ def parse_lineups(html: str, season: str, matchday: int) -> dict[str, object]:
                     if not name or len(cells) < 5:
                         raise FcoIntelligenceError("Malformed probable-lineup player row.")
                     values = [_number(_text(cell), percentage=True) for cell in cells[:5]]
-                    rows.append({"provider_name": name, "provider_team": team, "matchday": matchday, "opponent": opponent, "venue": venue, "section": group, "fc_pct": values[0], "gaz_pct": values[1], "sos_pct": values[2], "sky_pct": values[3], "weighted_pct": values[4], "source_count": sum(value is not None for value in values[:4]), "observation_at": observation, "official_confirmed": "confermato" in _text(cells[5]).lower() if len(cells) > 5 else None})
+                    rows.append({"provider_name": name, "provider_team": team, "matchday": matchday, "opponent": opponent, "venue": venue, **fixture_context, "section": group, "fc_pct": values[0], "gaz_pct": values[1], "sos_pct": values[2], "sky_pct": values[3], "weighted_pct": values[4], "source_count": sum(value is not None for value in values[:4]), "observation_at": observation, "official_confirmed": "confermato" in _text(cells[5]).lower() if len(cells) > 5 else None})
             unavailable = section.select_one(".prb-fuori")
             if unavailable is not None and "indisponibili" not in normalize(_text(unavailable.select_one(".prb-fuori__titolo"))):
                 raise FcoIntelligenceError("Probable-lineup unavailable section changed.")
@@ -375,7 +387,7 @@ def parse_lineups(html: str, season: str, matchday: int) -> dict[str, object]:
                 name = _text(row.select_one(".prb-nome"))
                 if not name:
                     raise FcoIntelligenceError("Malformed unavailable player row.")
-                rows.append({"provider_name": name, "provider_team": team, "matchday": matchday, "opponent": opponent, "venue": venue, "section": "unavailable", "fc_pct": None, "gaz_pct": None, "sos_pct": None, "sky_pct": None, "weighted_pct": None, "source_count": 0, "observation_at": observation, "official_confirmed": None})
+                rows.append({"provider_name": name, "provider_team": team, "matchday": matchday, "opponent": opponent, "venue": venue, **fixture_context, "section": "unavailable", "fc_pct": None, "gaz_pct": None, "sos_pct": None, "sky_pct": None, "weighted_pct": None, "source_count": 0, "observation_at": observation, "official_confirmed": None})
     if len({(normalize(row["provider_name"]), normalize(row["provider_team"])) for row in rows}) != len(rows) or len(teams) != 20 or len(rows) != evaluated:
         raise FcoIntelligenceError("Probable-lineup teams, identities or evaluated count do not match the page.")
     if source_count == 0 and rows:
@@ -448,6 +460,11 @@ def _price_cohort(participants: int, credits: int) -> tuple[dict[str, object] | 
     if budget is None:
         reasons.append(f"{credits} credits are outside the supported 300-400 and 440-560 ranges")
     return ({"teams": teams, "credits": budget, "field": f"price_{teams}_{budget}"}, None) if not reasons else (None, "; ".join(reasons))
+
+
+def _benchmark_cohort(participants: int) -> dict[str, object] | None:
+    teams = 8 if 7 <= participants <= 8 else 10 if 9 <= participants <= 11 else None
+    return {"teams": teams, "credits": 500, "field": f"price_{teams}_500"} if teams else None
 
 
 def _store_market(directory: Path, snapshot: dict[str, object]) -> None:
@@ -537,7 +554,9 @@ def _store_performance(root: Path, profile: object, parsed: dict[str, object], m
 
 def _audit_performance(directory: Path, cumulative: list[dict[str, object]], players: list[dict[str, object]]) -> dict[str, object]:
     resolved, unresolved = _resolve(cumulative, players)
-    totals: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    final_totals: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    provisional_totals: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    provisional_rounds: dict[tuple[int, str], list[int]] = defaultdict(list)
     coverage: dict[str, bool] = defaultdict(bool)
     for path in sorted((directory / "matchdays").glob("*.json")):
         snapshot = _read(path) or {}
@@ -546,13 +565,24 @@ def _audit_performance(directory: Path, cumulative: list[dict[str, object]], pla
         for row in snapshot.get("players", []):
             for event in ("assists", "penalties_scored", "penalties_missed"):
                 if row.get(event) is not None:
-                    totals[int(row["fantacalcio_id"])][event] += int(row[event])
-    discrepancies = []
+                    player_id = int(row["fantacalcio_id"])
+                    target = final_totals if snapshot.get("state") == "final" else provisional_totals
+                    target[player_id][event] += int(row[event])
+                    if snapshot.get("state") != "final" and int(row[event]):
+                        provisional_rounds[(player_id, event)].append(int(snapshot["matchday"]))
+    discrepancies, pending_sync = [], []
     for row in resolved:
         for event in ("assists", "penalties_scored", "penalties_missed"):
-            if coverage[event] and int(totals[int(row["fantacalcio_id"])][event]) != int(row.get(event) or 0):
-                discrepancies.append({"fantacalcio_id": row["fantacalcio_id"], "canonical_name": row["canonical_name"], "canonical_team": row["canonical_team"], "metric": event, "matchdays": totals[int(row["fantacalcio_id"])][event], "cumulative": int(row.get(event) or 0)})
-    return {"cumulative_rows": len(resolved), "unresolved": len(unresolved), "unresolved_classifications": _unresolved_summary(unresolved), "coverage": dict(coverage), "discrepancies": discrepancies}
+            player_id = int(row["fantacalcio_id"])
+            final = int(final_totals[player_id][event])
+            provisional = int(provisional_totals[player_id][event])
+            current = int(row.get(event) or 0)
+            base = {"fantacalcio_id": player_id, "canonical_name": row["canonical_name"], "canonical_team": row["canonical_team"], "metric": event, "final_matchday_total": final, "cumulative": current}
+            if coverage[event] and (current < final or current > final + provisional):
+                discrepancies.append({**base, "matchdays": final})
+            elif coverage[event] and provisional and current < final + provisional:
+                pending_sync.append({**base, "provisional_addition": provisional, "provisional_matchdays": sorted(set(provisional_rounds[(player_id, event)]))})
+    return {"cumulative_rows": len(resolved), "unresolved": len(unresolved), "unresolved_classifications": _unresolved_summary(unresolved), "coverage": dict(coverage), "discrepancies": discrepancies, "pending_sync": pending_sync}
 
 
 def _check_performance(root: Path, profile: object, fetcher: FetchPage, players: list[dict[str, object]], checked_at: str, force: bool) -> dict[str, object]:
@@ -604,10 +634,10 @@ def _check_market(root: Path, profile: object, fetcher: FetchPage, players: list
     active_ownership = "lte9" if participant_count <= 9 else "gte10"
     active_price_cohort, incompatibility = _price_cohort(participant_count, profile.credits.starting)
     price_field = active_price_cohort["field"] if active_price_cohort else None
-    benchmark = {"teams": 8, "credits": 500, "field": "price_8_500"}
+    benchmark = _benchmark_cohort(participant_count)
     for row in resolved:
         selected = row["ownership"].get(active_ownership, {})
-        row.update({"ownership_pct": selected.get("pct"), "ownership_delta_7d": selected.get("delta_7d"), "ownership_cohort": active_ownership, "market_source_date": ownership["overall"]["source_date"], "price_source_date": prices["source_date"], "price_cohort_compatible": active_price_cohort is not None, "price_cohort_reason": incompatibility, "active_league": {"participants": participant_count, "credits": profile.credits.starting}, "market_price": row.get(price_field) if price_field else None, "market_price_cohort": active_price_cohort, "benchmark_market_price": row.get(benchmark["field"]), "benchmark_market_price_cohort": benchmark})
+        row.update({"ownership_pct": selected.get("pct"), "ownership_delta_7d": selected.get("delta_7d"), "ownership_cohort": active_ownership, "market_source_date": ownership["overall"]["source_date"], "price_source_date": prices["source_date"], "price_cohort_compatible": active_price_cohort is not None, "price_cohort_reason": incompatibility, "active_league": {"participants": participant_count, "credits": profile.credits.starting}, "market_price": row.get(price_field) if price_field else None, "market_price_cohort": active_price_cohort, "benchmark_market_price": row.get(benchmark["field"]) if benchmark else None, "benchmark_market_price_cohort": benchmark})
     source_date = ownership["overall"]["source_date"]
     snapshot = {"schema_version": "1.0", "provider": PROVIDER, "season": profile.season.season, "checked_at": checked_at, "market_source_date": source_date, "price_source_date": prices["source_date"], "minimum_auctions": 3, "ownership_source": "observed FCO league ownership percentage", "ownership_cohorts": ["overall", "lte9", "gte10"], "active_ownership_cohort": active_ownership, "active_league": {"participants": participant_count, "credits": profile.credits.starting}, "price_cohort_compatible": active_price_cohort is not None, "price_cohort_reason": incompatibility, "active_price_cohort": active_price_cohort, "benchmark_price_cohort": benchmark, "players": resolved, "unresolved": unresolved, "summary": {"ownership_rows": len(ownership["overall"]["rows"]), "price_rows": len(prices["rows"]), "players": len(resolved), "current_season_prices": sum(any(row.get(field, {}).get("current_season") for field in PRICE_FIELDS) for row in resolved), "fallback_prices": sum(any(row.get(field, {}).get("fallback_previous_season") for field in PRICE_FIELDS) for row in resolved), "new_players": sum(bool(row.get("new_player")) for row in resolved), "unresolved": len(unresolved), "unresolved_classifications": _unresolved_summary(unresolved)}}
     directory = _directory(root, profile, "market-v1")
