@@ -268,7 +268,7 @@ export default function PlayersView({
       mark={mark}
       showMedia={showMedia}
       noteMaxLength={NOTE_MAX_LENGTH}
-      intelligence={p1PlayerViewModel(p1, player.id, data.players, activeRules)}
+      intelligence={p1PlayerViewModel(p1, player.id, data.players, activeRules, board)}
       onToggleTarget={() =>
         updateNotes(withTarget(notes, player.id, !mark.target))
       }
@@ -707,6 +707,8 @@ export function PlayerDetail({
 }
 
 export function PlayerIntelligence({ intelligence }) {
+  const [horizon, setHorizon] = useState(5);
+  const [showAuctionedPairs, setShowAuctionedPairs] = useState(false);
   const performance = intelligence?.performance || [];
   const market = intelligence?.market;
   const lineup = intelligence?.lineup;
@@ -717,6 +719,8 @@ export function PlayerIntelligence({ intelligence }) {
   const price = compatible ? market?.market_price : market?.benchmark_market_price;
   const cohort = compatible ? market?.market_price_cohort : market?.benchmark_market_price_cohort;
   const sources = [["FC", lineup?.fc_pct], ["Gaz", lineup?.gaz_pct], ["SOS", lineup?.sos_pct], ["Sky", lineup?.sky_pct]];
+  const calendar = intelligence?.calendar?.[horizon];
+  const pairings = (calendar?.pairings || []).filter((row) => showAuctionedPairs || !row.auctioned).slice(0, 5);
   return <div className="p1-intelligence">
     <section>
       <div className="section-head"><h2>Rendimento</h2>{Number.isFinite(form?.mean_fc_vote) && <span>MV FC {form.mean_fc_vote.toFixed(2)} · {form.numeric_fc_votes} voti</span>}</div>
@@ -751,6 +755,28 @@ export function PlayerIntelligence({ intelligence }) {
         <div className="p1-sources">{sources.map(([label, value]) => <span key={label}><small>{label}</small><b>{Number.isFinite(value) ? value : "—"}</b></span>)}</div>
         <p className="micro">{lineup.source_count}/4 fonti · rilevazione {lineup.observation_at?.slice(0, 16).replace("T", " ")}</p>
       </> : <p className="micro">Probabilità prossima partita non disponibile.</p>}
+    </section>
+    <section>
+      <div className="section-head"><h2>Calendario</h2><span>Forza avversario relativa</span></div>
+      <div className="p3-horizons" role="group" aria-label="Orizzonte calendario">{[5, 8, 10].map((value) => <button type="button" key={value} className={horizon === value ? "is-active" : ""} aria-pressed={horizon === value} onClick={() => setHorizon(value)}>{value}</button>)}</div>
+      {calendar?.fixtures?.length ? <div className="p3-calendar">{calendar.fixtures.map((fixture, index) => {
+        const difficulty = fixture.opponent_strength_percentile;
+        const ownWin = fixture.venue === "HOME" ? fixture.market?.home_win_pct : fixture.market?.away_win_pct;
+        const loss = fixture.venue === "HOME" ? fixture.market?.away_win_pct : fixture.market?.home_win_pct;
+        return <div key={fixture.matchday} className={`p3-fixture difficulty-${difficulty >= 70 ? "hard" : difficulty <= 40 ? "easy" : "medium"}`}>
+          <b>G{fixture.matchday}</b><span>{fixture.venue === "HOME" ? "vs" : "@"} {fixture.opponent}</span><strong aria-label={`Difficoltà ${difficulty} su 100`}>{difficulty}</strong>
+          {index === 0 && fixture.market ? <small>vittoria {ownWin}% · pari {fixture.market.draw_pct}% · sconfitta {loss}% · 3+ gol {fixture.market.three_plus_goals_pct}% · quote {fixture.market.observation_at.slice(5, 16).replace("T", " ")}</small> : null}
+        </div>;
+      })}</div> : <p className="micro">Contesto calendario non ancora disponibile.</p>}
+    </section>
+    <section>
+      <div className="section-head"><h2>Abbinamenti calendario</h2></div>
+      <label className="p3-auctioned-filter"><input type="checkbox" checked={showAuctionedPairs} onChange={(event) => setShowAuctionedPairs(event.target.checked)} /> Mostra già assegnati</label>
+      {pairings.length ? <div className="p3-pairings">{pairings.map((row) => <details key={row.player.id}>
+        <summary><span><b>{row.player.nome}</b><small>{row.player.squadra}{row.auctioned ? " · assegnato" : ""}</small></span><span><b>+{row.metrics.complementarity_gain.toFixed(1)} pp</b><small>media coppia {row.metrics.mean_best_pair.toFixed(1)} · facili {row.metrics.easy_coverage}/{row.metrics.sample_size} · dure insieme {row.metrics.hard_overlap}/{row.metrics.sample_size}</small></span></summary>
+        <table><thead><tr><th></th>{row.metrics.matchdays.map((matchday) => <th key={matchday}>G{matchday}</th>)}</tr></thead><tbody><tr><th>Scelto</th>{row.metrics.vector_a.map((value, index) => <td key={index}>{value}</td>)}</tr><tr><th>{row.player.nome}</th>{row.metrics.vector_b.map((value, index) => <td key={index}>{value}</td>)}</tr><tr><th>Best</th>{row.metrics.best_pair.map((value, index) => <td key={index}>{value}</td>)}</tr></tbody></table>
+      </details>)}</div> : <p className="micro">Nessun abbinamento dello stesso ruolo disponibile.</p>}
+      <p className="micro">Il guadagno confronta la difficoltà media della coppia con il calendario singolo migliore; non è una raccomandazione d’asta.</p>
     </section>
   </div>;
 }

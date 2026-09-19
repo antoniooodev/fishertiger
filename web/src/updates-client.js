@@ -141,9 +141,10 @@ export const checkAllUpdateSources = async (profile, options = {}) => {
       { label: "FCO Mercato", result: result.market, error: result.errors?.market },
       { label: "FCO Probabili", result: result.lineups, error: result.errors?.lineups },
       { label: "FCO Indici", result: result.forecast, error: result.errors?.forecast },
+      { label: "FCO Contesto calendario", result: result.fixture_context, error: result.errors?.fixture_context },
     );
   } catch (error) {
-    for (const label of ["FCO Prestazioni", "FCO Mercato", "FCO Probabili", "FCO Indici"])
+    for (const label of ["FCO Prestazioni", "FCO Mercato", "FCO Probabili", "FCO Indici", "FCO Contesto calendario"])
       rows.push({ label, error: error?.message || "Controllo non riuscito" });
   }
   return rows;

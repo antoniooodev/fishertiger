@@ -4,6 +4,37 @@ const id = (value) => String(value ?? "");
 const mean = (values) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 const percentile = (values, value) => Number.isFinite(value) && values.length ? Math.round(values.filter((item) => item <= value).length / values.length * 100) : null;
 
+export const teamCalendar = (fixtureContext, team, horizon = 5) => {
+  const current = Number(fixtureContext?.current_matchday || 1);
+  return (fixtureContext?.fixtures || [])
+    .filter((row) => row.normalized_team === String(team || "").toLocaleLowerCase() || row.team === team)
+    .filter((row) => row.matchday > current || (row.matchday === current && row.fixture_state === "upcoming"))
+    .sort((a, b) => a.matchday - b.matchday)
+    .slice(0, horizon);
+};
+
+export const pairingMetrics = (first, second, horizon = Math.min(first.length, second.length)) => {
+  const hasRounds = first.every((row) => Number.isInteger(row.matchday)) && second.every((row) => Number.isInteger(row.matchday));
+  const pairs = hasRounds
+    ? first.map((row) => [row, second.find((candidate) => candidate.matchday === row.matchday)]).filter(([, row]) => row).slice(0, horizon)
+    : first.slice(0, horizon).map((row, index) => [row, second[index]]).filter(([, row]) => row);
+  const length = pairs.length;
+  const a = pairs.map(([row]) => row.opponent_strength_percentile);
+  const b = pairs.map(([, row]) => row.opponent_strength_percentile);
+  const best = a.map((value, index) => Math.min(value, b[index]));
+  const average = (values) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+  const meanA = average(a), meanB = average(b), meanBest = average(best);
+  return { matchdays: pairs.map(([row], index) => row.matchday ?? index + 1), vector_a: a, vector_b: b, best_pair: best, mean_a: meanA, mean_b: meanB, mean_best_pair: meanBest, complementarity_gain: length ? Math.min(meanA, meanB) - meanBest : null, hard_overlap: a.filter((value, index) => value >= 70 && b[index] >= 70).length, easy_coverage: best.filter((value) => value <= 40).length, sample_size: length };
+};
+
+export const pairingSuggestions = (fixtureContext, selected, players, assigned = {}, horizon = 5) => {
+  const base = teamCalendar(fixtureContext, selected?.squadra, 38);
+  return (players || []).filter((candidate) => candidate.id !== selected?.id && candidate.ruolo === selected?.ruolo && candidate.squadra && !candidate.ceduto)
+    .map((candidate) => ({ player: candidate, auctioned: Boolean(assigned?.[id(candidate.id)]), metrics: pairingMetrics(base, teamCalendar(fixtureContext, candidate.squadra, 38), horizon) }))
+    .filter((row) => row.metrics.sample_size === horizon)
+    .sort((left, right) => (right.metrics.complementarity_gain - left.metrics.complementarity_gain) || (left.metrics.mean_best_pair - right.metrics.mean_best_pair) || left.player.nome.localeCompare(right.player.nome));
+};
+
 export const finalizedForm = (performance, playerId) => {
   const states = new Map((performance?.matchdays || []).map((row) => [row.matchday, row.state]));
   const rows = (performance?.players || []).filter((row) => id(row.fantacalcio_id) === id(playerId) && states.get(row.matchday) === "final");
@@ -22,7 +53,7 @@ export const finalizedForm = (performance, playerId) => {
   };
 };
 
-export const p1PlayerViewModel = (snapshot, playerId, players = [], rules = {}) => {
+export const p1PlayerViewModel = (snapshot, playerId, players = [], rules = {}, board = null) => {
   const states = new Map((snapshot?.performance?.matchdays || []).map((row) => [row.matchday, row.state]));
   const performance = (snapshot?.performance?.players || [])
     .filter((row) => id(row.fantacalcio_id) === id(playerId))
@@ -42,6 +73,10 @@ export const p1PlayerViewModel = (snapshot, playerId, players = [], rules = {}) 
   const ownershipValues = marketRows.filter((row) => row.canonical_role === role && Number.isFinite(row.ownership_pct)).map((row) => row.ownership_pct);
   const modelPercentile = percentile(modelValues, modelValue);
   const marketPercentile = selectedPrice?.current_season && !selectedPrice?.fallback_previous_season && !selectedPrice?.unavailable ? percentile(currentPrices, selectedPrice.value) : null;
+  const calendars = Object.fromEntries([5, 8, 10].map((horizon) => [horizon, {
+    fixtures: teamCalendar(snapshot?.fixture_context, player?.squadra, horizon),
+    pairings: pairingSuggestions(snapshot?.fixture_context, player, players, board?.assigned, horizon),
+  }]));
   return {
     performance: performance.slice(0, 5),
     form: (snapshot?.performance?.form_analytics || []).find((row) => id(row.fantacalcio_id) === id(playerId)) || finalizedForm(snapshot?.performance, playerId),
@@ -49,6 +84,7 @@ export const p1PlayerViewModel = (snapshot, playerId, players = [], rules = {}) 
     forecast: forecast && { ...forecast, potential_gap: forecast.fantaindex_potential - forecast.fantaindex_current },
     lineup,
     positioning: { model_percentile: modelPercentile, market_percentile: marketPercentile, model_market_gap_pp: Number.isFinite(modelPercentile) && Number.isFinite(marketPercentile) ? modelPercentile - marketPercentile : null, ownership_role_percentile: Number.isFinite(market?.ownership_pct) ? percentile(ownershipValues, market.ownership_pct) : null, market_sample_size: currentPrices.length, model_sample_size: modelValues.length, ownership_sample_size: ownershipValues.length, non_comparable_credits: market ? !market.price_cohort_compatible : null },
+    calendar: calendars,
   };
 };
 

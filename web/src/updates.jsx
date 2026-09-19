@@ -65,7 +65,7 @@ const displayFormationSnapshot = (change, prefix) => {
   return [formation, ...text].filter(Boolean).join("\n\n") || "-";
 };
 
-const HEALTH_LABELS = ["SOS Guida", "SOS Formazioni", "SOS Piazzati", "Listone", "SOS Portieri", "Disponibilità FCO", "FCO Prestazioni", "FCO Mercato", "FCO Probabili", "FCO Indici"];
+const HEALTH_LABELS = ["SOS Guida", "SOS Formazioni", "SOS Piazzati", "Listone", "SOS Portieri", "Disponibilità FCO", "FCO Prestazioni", "FCO Mercato", "FCO Probabili", "FCO Indici", "FCO Contesto calendario"];
 const unresolvedBreakdown = (items = {}) => `fuori listone ${items.outside_active_listone || 0} · fuzzy ${items.fuzzy_requires_confirmation || 0} · ambigue ${items.ambiguous || 0} · squadra assente ${items.team_not_in_active_listone || 0} · altre ${items.other || 0}`;
 
 function UpdateHealth({ profile, apiBase }) {
@@ -84,7 +84,8 @@ function UpdateHealth({ profile, apiBase }) {
           const fco = label === "FCO Prestazioni" && result ? `${result.available_matchdays} giornate · ${result.final_matchdays} finali / ${result.provisional_matchdays} provvisorie · ${result.unresolved} irrisolti (${unresolvedBreakdown(result.unresolved_classifications)}) · ${result.cumulative_audit?.discrepancies?.length || 0} discrepanze confermate · ${result.cumulative_audit?.pending_sync?.length || 0} sincronizzazioni provvisorie`
             : label === "FCO Mercato" && result ? `ownership ${result.market_source_date} · prezzi ${result.price_source_date} · ${result.summary?.players || 0} giocatori · ${result.summary?.current_season_prices || 0} correnti / ${result.summary?.fallback_prices || 0} fallback · ${unresolvedBreakdown(result.summary?.unresolved_classifications)}`
               : label === "FCO Probabili" && result ? `G${result.matchday} · ${result.active_source_count}/4 fonti · ${result.evaluated_players} valutati · ${result.unresolved?.length || 0} irrisolti (${unresolvedBreakdown(result.unresolved_classifications)})`
-                : label === "FCO Indici" && result ? `${result.source_date} · ${result.source_rows} righe · ${result.resolved} risolti / ${result.unresolved?.length || 0} irrisolti (${unresolvedBreakdown(result.unresolved_classifications)})` : "";
+                : label === "FCO Indici" && result ? `${result.source_date} · ${result.source_rows} righe · ${result.resolved} risolti / ${result.unresolved?.length || 0} irrisolti (${unresolvedBreakdown(result.unresolved_classifications)})`
+                  : label === "FCO Contesto calendario" && result ? `${result.calendar?.exact_matches || 0}/380 partite ufficiali · forza ${result.team_strength?.team_count || 0}/20 · ${result.near_term_markets?.fixture_count || 0} mercati correnti` : "";
           const detail = error || fco || (result ? `${updateStateLabel(result.state)}${issues ? ` · ${issues} problemi locali` : ""}${Number.isFinite(records) ? ` · ${records} record` : ""}${Number.isFinite(unresolved) ? ` · ${unresolved} irrisolti` : ""}` : "Non controllato");
           return <p key={label}><strong>{label}</strong><span>{detail}</span></p>;
         })}
@@ -98,6 +99,7 @@ const fcoDetails = (result) => {
   const market = result?.market;
   const lineups = result?.lineups;
   const forecast = result?.forecast;
+  const fixture = result?.fixture_context;
   return [
     ["FCO Prestazioni", performance
       ? `${performance.available_matchdays} giornate · ${performance.final_matchdays} finali / ${performance.provisional_matchdays} provvisorie · ${performance.resolved} risolti / ${performance.unresolved} irrisolti (${unresolvedBreakdown(performance.unresolved_classifications)}) · audit cumulativo: ${unresolvedBreakdown(performance.cumulative_audit?.unresolved_classifications)} · ${performance.cumulative_audit?.discrepancies?.length || 0} discrepanze confermate · ${performance.cumulative_audit?.pending_sync?.length || 0} sincronizzazioni provvisorie`
@@ -111,6 +113,9 @@ const fcoDetails = (result) => {
     ["FCO Indici", forecast
       ? `${forecast.source_date} · ${forecast.source_rows} righe · ${forecast.resolved} risolti / ${forecast.unresolved?.length || 0} irrisolti (${unresolvedBreakdown(forecast.unresolved_classifications)})`
       : "Non ancora disponibili"],
+    ["FCO Contesto calendario", fixture
+      ? `calendario ${fixture.calendar?.rounds}/38 giornate · ${fixture.calendar?.fixtures}/380 partite · ufficiale ${fixture.calendar?.state} · forza ${fixture.team_strength?.team_count}/20 (${fixture.team_strength?.semantic_label}) · quote correnti ${fixture.near_term_markets?.fixture_count || 0}${fixture.near_term_markets?.observation_at ? ` · ${fixture.near_term_markets.observation_at.slice(0, 16).replace("T", " ")}` : ""}`
+      : "Non ancora disponibile"],
   ];
 };
 
@@ -138,8 +143,8 @@ function FcoUpdates({ profile, apiBase }) {
     }
   };
   return <article className="update-source-card">
-    <header><div><h2>Fantacalcio Online</h2></div><span className={`update-state ${result?.state || "idle"}`}>P1</span></header>
-    <div className="update-actions"><button className="update-check-button" onClick={check} disabled={busy}><ActionIcon name="refresh" /><span>{busy ? "Controllo in corso..." : "Aggiorna prestazioni, mercato e probabili"}</span></button></div>
+    <header><div><h2>Fantacalcio Online</h2></div><span className={`update-state ${result?.state || "idle"}`}>P1–P3</span></header>
+    <div className="update-actions"><button className="update-check-button" onClick={check} disabled={busy}><ActionIcon name="refresh" /><span>{busy ? "Controllo in corso..." : "Aggiorna fonti FCO"}</span></button></div>
     <div className="listone-entry-list">{fcoDetails(result).map(([label, detail]) => <p key={label}><strong>{label}</strong><span>{detail}</span></p>)}</div>
     {result?.performance?.cumulative_audit?.discrepancies?.length ? <details className="injury-update-details"><summary>Discrepanze confermate <b>{result.performance.cumulative_audit.discrepancies.length}</b></summary><div className="listone-entry-list">{result.performance.cumulative_audit.discrepancies.map((item) => <p key={`${item.fantacalcio_id}-${item.metric}`}><strong>{item.canonical_name} · #{item.fantacalcio_id}</strong><span>{item.metric}: giornate finali {item.final_matchday_total} · cumulativo FCO {item.cumulative}</span></p>)}</div></details> : null}
     {result?.performance?.cumulative_audit?.pending_sync?.length ? <details className="injury-update-details"><summary>Sincronizzazioni provvisorie in attesa <b>{result.performance.cumulative_audit.pending_sync.length}</b></summary><div className="listone-entry-list">{result.performance.cumulative_audit.pending_sync.map((item) => <p key={`${item.fantacalcio_id}-${item.metric}`}><strong>{item.canonical_name} · #{item.fantacalcio_id}</strong><span>{item.metric}: finali {item.final_matchday_total} + provvisorio {item.provisional_addition} (G{item.provisional_matchdays.join(", G")}) · cumulativo FCO {item.cumulative}</span></p>)}</div></details> : null}

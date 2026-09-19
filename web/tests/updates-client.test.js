@@ -109,7 +109,8 @@ test("check-all tolerates one failure and only calls check endpoints", async () 
       return { ok: true, status: 200, json: async () => ({ state: "unchanged" }) };
     },
   });
-  assert.equal(rows.length, 10);
+  assert.equal(rows.length, 11);
+  assert.equal(rows.at(-1).label, "FCO Contesto calendario");
   assert.equal(rows.filter((row) => row.error).length, 1);
   assert.equal(urls.every((url) => url.endsWith("/check")), true);
   assert.equal(urls.some((url) => url.includes("/apply") || url.includes("/accept")), false);

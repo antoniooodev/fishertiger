@@ -16,6 +16,11 @@ from bs4 import BeautifulSoup
 
 from .player_identity import load_identity_overrides, normalize, resolve_player
 from .player_list_updates import active_player_list_path, read_player_list, season_years
+from .fixture_context import (
+    OFFICIAL_2026_27_DIGEST, STRENGTH_LABEL, FixtureContextError,
+    build_fixture_rows, merge_strengths, parse_match_context, read_calendar,
+    validate_calendar,
+)
 
 PROVIDER = "fantacalcio-online"
 BASE = "https://www.fantacalcio-online.com/it"
@@ -43,6 +48,11 @@ def performance_url(season: str, matchday: int | str) -> str:
 
 def lineup_url(season: str, matchday: int) -> str:
     return f"{BASE}/serie-a/{_slug(season)}/probabili-formazioni/{matchday}-giornata"
+
+
+def match_url(season: str, matchday: int, home: str, away: str) -> str:
+    slug = f"{normalize(home)}-{normalize(away)}".replace(" ", "-")
+    return f"{performance_url(season, matchday)}/{slug}"
 
 
 CUMULATIVE_URL = f"{BASE}/serie-a/{{season}}/statistiche-bonus-malus"
@@ -557,7 +567,8 @@ def _status(root: Path, profile: object) -> dict[str, object]:
     market = _read(_directory(root, profile, "market-v1") / "latest.json")
     lineups = _read(_directory(root, profile, "lineup-probability-v1") / "latest.json")
     forecast = _read(_directory(root, profile, "forecast-v1") / "latest.json")
-    return {"schema_version": "1.0", "provider": PROVIDER, "season": profile.season.season, "performance": performance, "market": market, "lineups": lineups, "forecast": forecast}
+    fixture_context = _read(_directory(root, profile, "fixture-context-v1") / "latest.json")
+    return {"schema_version": "1.0", "provider": PROVIDER, "season": profile.season.season, "performance": performance, "market": market, "lineups": lineups, "forecast": forecast, "fixture_context": fixture_context}
 
 
 def stored_status(root: Path, profile: object) -> dict[str, object]:
@@ -735,6 +746,60 @@ def _check_lineups(root: Path, profile: object, fetcher: FetchPage, players: lis
     return snapshot
 
 
+def _calendar_source(profile: object) -> Path:
+    source = next((item for item in profile.current_sources if item.name == "serie_a_calendar"), None)
+    if source is None:
+        raise FixtureContextError("The active profile does not declare a Serie A calendar.")
+    return Path(source.path)
+
+
+def _check_fixture_context(root: Path, profile: object, fetcher: FetchPage, checked_at: str, performance: dict[str, object], lineups: dict[str, object] | None) -> dict[str, object]:
+    calendar = read_calendar(_calendar_source(profile))
+    expected = OFFICIAL_2026_27_DIGEST if profile.season.season == "2026/27" else None
+    calendar_validation = validate_calendar(calendar, expected_digest=expected)
+    current_matchday = int((lineups or {}).get("matchday") or performance.get("latest_played_matchday") or 1)
+    round_snapshot = _read(_directory(root, profile, "performance-v1") / "matchdays" / f"{current_matchday:02}.json") or {}
+    current_fixtures = round_snapshot.get("fixtures") or (lineups or {}).get("fixtures") or []
+    if len(current_fixtures) != 10:
+        raise FixtureContextError("Current fixture state is unavailable.")
+    state_by_pair = {(normalize(row["home_team"]), normalize(row["away_team"])): _fixture_state(str(row.get("status", ""))) for row in current_fixtures}
+    directory = _directory(root, profile, "fixture-context-v1")
+    stored_strength = _read(directory / "team-strength.json")
+    contexts = []
+    for fixture in current_fixtures:
+        state = state_by_pair[(normalize(fixture["home_team"]), normalize(fixture["away_team"]))]
+        if stored_strength and state != "upcoming":
+            continue
+        url = match_url(profile.season.season, current_matchday, fixture["home_team"], fixture["away_team"])
+        contexts.append(parse_match_context(fetcher(url), profile.season.season, current_matchday, fixture["home_team"], fixture["away_team"]))
+    if stored_strength:
+        teams = stored_strength.get("teams", [])
+        if len(teams) != 20:
+            raise FixtureContextError("Stored FCO team-strength snapshot is incomplete.")
+        known = {row["normalized_team"]: row["strength"] for row in teams}
+        for row in merge_strengths(contexts, require_all=False):
+            if known.get(row["normalized_team"]) != row["strength"]:
+                raise FixtureContextError(f"Conflicting antepost strength for {row['team']}.")
+    else:
+        teams = merge_strengths(contexts)
+        stored_strength = {"schema_version": "1.0", "provider": PROVIDER, "season": profile.season.season, "checked_at": checked_at, "semantic_label": STRENGTH_LABEL, "scale_min": 0, "scale_max": 10, "teams": teams}
+        _write(directory / "team-strength.json", stored_strength)
+    markets, states = {}, {}
+    by_fixture = {(normalize(row["home_team"]), normalize(row["away_team"])): row for row in contexts}
+    for fixture in current_fixtures:
+        pair = (normalize(fixture["home_team"]), normalize(fixture["away_team"]))
+        key = f"{current_matchday}:{pair[0]}:{pair[1]}"
+        states[key] = state_by_pair[pair]
+        context = by_fixture.get(pair)
+        if context and context.get("market") and state_by_pair[pair] == "upcoming":
+            markets[key] = context["market"]
+    fixture_rows = build_fixture_rows(calendar, teams, states, markets)
+    observations = sorted({row["observation_at"] for row in markets.values()})
+    snapshot = {"schema_version": "1.0", "provider": PROVIDER, "season": profile.season.season, "checked_at": checked_at, "calendar": calendar_validation, "team_strength": {**stored_strength, "team_count": len(teams)}, "current_matchday": current_matchday, "near_term_markets": {"fixture_count": len(markets), "observation_at": observations[-1] if observations else None}, "fixtures": fixture_rows}
+    _write(directory / "latest.json", snapshot)
+    return snapshot
+
+
 def check_updates(root: Path, profile: object, fetcher: FetchPage = fetch_page, *, force: bool = False, now: datetime | None = None) -> dict[str, object]:
     """Refresh P1 sources; any failed source keeps its last valid snapshot."""
     moment = now or datetime.now(timezone.utc)
@@ -763,6 +828,15 @@ def check_updates(root: Path, profile: object, fetcher: FetchPage = fetch_page, 
             raise FcoIntelligenceError("Performance matchday is unavailable, so the upcoming round is unknown.")
     except Exception as error:
         errors["lineups"] = str(error)
+    try:
+        if not force and _fresh(result.get("fixture_context"), moment):
+            pass
+        elif result.get("performance"):
+            result["fixture_context"] = _check_fixture_context(root, profile, fetcher, checked_at, result["performance"], result.get("lineups"))
+        else:
+            raise FixtureContextError("Performance fixture state is unavailable.")
+    except Exception as error:
+        errors["fixture_context"] = str(error)
     result["errors"] = errors
     result["state"] = "error" if errors else "fresh"
     return result

@@ -538,6 +538,26 @@
 .p2-timeline small, .p2-timeline span, .p2-timeline em { color: var(--c-text-mute); font-size: var(--fs-2xs); font-style: normal; }
 .p2-timeline strong { font-family: var(--font-num); }
 .p2-subhead { margin: var(--s-4) 0 var(--s-2); font-size: var(--fs-sm); }
+.p3-horizons { display: flex; gap: var(--s-1); margin-bottom: var(--s-2); }
+.p3-horizons button { border: 1px solid var(--c-line); border-radius: 999px; background: transparent; color: var(--c-text-mute); padding: .2rem .65rem; }
+.p3-horizons button.is-active { border-color: var(--c-brand); color: var(--c-brand); font-weight: 700; }
+.p3-calendar { display: grid; gap: var(--s-1); }
+.p3-fixture { display: grid; grid-template-columns: 2rem 1fr 2.5rem; align-items: center; gap: var(--s-2); border-left: 4px solid var(--c-line); border-radius: var(--r-sm); padding: .45rem .6rem; background: var(--c-surface-2); }
+.p3-fixture strong { text-align: right; }
+.p3-fixture small { grid-column: 2 / -1; color: var(--c-text-mute); }
+.p3-fixture.difficulty-easy { border-left-color: var(--c-go); }
+.p3-fixture.difficulty-medium { border-left-color: var(--c-warn); }
+.p3-fixture.difficulty-hard { border-left-color: var(--c-stop); }
+.p3-auctioned-filter { display: flex; align-items: center; gap: var(--s-1); color: var(--c-text-mute); font-size: var(--fs-xs); margin-bottom: var(--s-2); }
+.p3-pairings { display: grid; gap: var(--s-1); }
+.p3-pairings details { border: 1px solid var(--c-line); border-radius: var(--r-sm); padding: .55rem .65rem; overflow-x: auto; }
+.p3-pairings summary { display: flex; justify-content: space-between; gap: var(--s-2); cursor: pointer; }
+.p3-pairings summary span { display: grid; }
+.p3-pairings summary span:last-child { text-align: right; }
+.p3-pairings summary small { color: var(--c-text-mute); }
+.p3-pairings table { border-collapse: collapse; font-size: var(--fs-2xs); margin-top: var(--s-2); min-width: 100%; }
+.p3-pairings th, .p3-pairings td { border-top: 1px solid var(--c-line); padding: .3rem; text-align: center; }
+.p3-pairings th:first-child { text-align: left; max-width: 7rem; overflow: hidden; text-overflow: ellipsis; }
 
 .p1-facts {
   display: grid;
