@@ -65,7 +65,7 @@ const displayFormationSnapshot = (change, prefix) => {
   return [formation, ...text].filter(Boolean).join("\n\n") || "-";
 };
 
-const HEALTH_LABELS = ["SOS Guida", "SOS Formazioni", "SOS Piazzati", "Listone", "SOS Portieri", "Disponibilità FCO", "FCO Prestazioni", "FCO Mercato", "FCO Probabili"];
+const HEALTH_LABELS = ["SOS Guida", "SOS Formazioni", "SOS Piazzati", "Listone", "SOS Portieri", "Disponibilità FCO", "FCO Prestazioni", "FCO Mercato", "FCO Probabili", "FCO Indici"];
 const unresolvedBreakdown = (items = {}) => `fuori listone ${items.outside_active_listone || 0} · fuzzy ${items.fuzzy_requires_confirmation || 0} · ambigue ${items.ambiguous || 0} · squadra assente ${items.team_not_in_active_listone || 0} · altre ${items.other || 0}`;
 
 function UpdateHealth({ profile, apiBase }) {
@@ -83,7 +83,8 @@ function UpdateHealth({ profile, apiBase }) {
           const unresolved = result?.snapshot?.unresolved?.length;
           const fco = label === "FCO Prestazioni" && result ? `${result.available_matchdays} giornate · ${result.final_matchdays} finali / ${result.provisional_matchdays} provvisorie · ${result.unresolved} irrisolti (${unresolvedBreakdown(result.unresolved_classifications)}) · ${result.cumulative_audit?.discrepancies?.length || 0} discrepanze confermate · ${result.cumulative_audit?.pending_sync?.length || 0} sincronizzazioni provvisorie`
             : label === "FCO Mercato" && result ? `ownership ${result.market_source_date} · prezzi ${result.price_source_date} · ${result.summary?.players || 0} giocatori · ${result.summary?.current_season_prices || 0} correnti / ${result.summary?.fallback_prices || 0} fallback · ${unresolvedBreakdown(result.summary?.unresolved_classifications)}`
-              : label === "FCO Probabili" && result ? `G${result.matchday} · ${result.active_source_count}/4 fonti · ${result.evaluated_players} valutati · ${result.unresolved?.length || 0} irrisolti (${unresolvedBreakdown(result.unresolved_classifications)})` : "";
+              : label === "FCO Probabili" && result ? `G${result.matchday} · ${result.active_source_count}/4 fonti · ${result.evaluated_players} valutati · ${result.unresolved?.length || 0} irrisolti (${unresolvedBreakdown(result.unresolved_classifications)})`
+                : label === "FCO Indici" && result ? `${result.source_date} · ${result.source_rows} righe · ${result.resolved} risolti / ${result.unresolved?.length || 0} irrisolti (${unresolvedBreakdown(result.unresolved_classifications)})` : "";
           const detail = error || fco || (result ? `${updateStateLabel(result.state)}${issues ? ` · ${issues} problemi locali` : ""}${Number.isFinite(records) ? ` · ${records} record` : ""}${Number.isFinite(unresolved) ? ` · ${unresolved} irrisolti` : ""}` : "Non controllato");
           return <p key={label}><strong>{label}</strong><span>{detail}</span></p>;
         })}
@@ -96,6 +97,7 @@ const fcoDetails = (result) => {
   const performance = result?.performance;
   const market = result?.market;
   const lineups = result?.lineups;
+  const forecast = result?.forecast;
   return [
     ["FCO Prestazioni", performance
       ? `${performance.available_matchdays} giornate · ${performance.final_matchdays} finali / ${performance.provisional_matchdays} provvisorie · ${performance.resolved} risolti / ${performance.unresolved} irrisolti (${unresolvedBreakdown(performance.unresolved_classifications)}) · audit cumulativo: ${unresolvedBreakdown(performance.cumulative_audit?.unresolved_classifications)} · ${performance.cumulative_audit?.discrepancies?.length || 0} discrepanze confermate · ${performance.cumulative_audit?.pending_sync?.length || 0} sincronizzazioni provvisorie`
@@ -105,6 +107,9 @@ const fcoDetails = (result) => {
       : "Non ancora disponibile"],
     ["FCO Probabili", lineups
       ? `G${lineups.matchday} · ${lineups.observation_at?.slice(0, 16).replace("T", " ")} · ${lineups.active_source_count}/4 fonti · ${lineups.evaluated_players} valutati · ${lineups.unresolved?.length || 0} irrisolti (${unresolvedBreakdown(lineups.unresolved_classifications)})`
+      : "Non ancora disponibili"],
+    ["FCO Indici", forecast
+      ? `${forecast.source_date} · ${forecast.source_rows} righe · ${forecast.resolved} risolti / ${forecast.unresolved?.length || 0} irrisolti (${unresolvedBreakdown(forecast.unresolved_classifications)})`
       : "Non ancora disponibili"],
   ];
 };

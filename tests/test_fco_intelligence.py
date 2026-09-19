@@ -7,14 +7,17 @@ from advisor.fco_intelligence import (
     FcoIntelligenceError,
     _audit_performance,
     _benchmark_cohort,
+    _check_forecast,
     _check_performance,
     _price_cohort,
     _require_unique_canonical,
     _store_market,
     _store_performance,
     _unresolved_summary,
+    form_analytics,
     _write,
     parse_cumulative,
+    parse_forecast,
     parse_lineups,
     parse_ownership,
     parse_performance,
@@ -22,6 +25,27 @@ from advisor.fco_intelligence import (
 )
 
 SEASON = "2026/27"
+
+
+def forecast_html(*, season="2026/2027", date="19/09/2026", current="6.60", potential="7.50", titularity="7.00", duplicate=False):
+    entry = f"""<div data-entry><div data-prop-name='player'><div data-prop-name='id'>5678</div><div data-prop-name='firstName'>Djed</div><div data-prop-name='lastName'>SPENCE</div><div data-prop-name='kapitals'>17</div><div data-prop-name='overall'>{potential}</div><div data-prop-name='pot'>{current}</div><div data-prop-name='lineupRating'>{titularity}</div></div><div data-prop-name='realteam'><div data-prop-name='name'>Inter</div></div></div>"""
+    return f"""<h1>Quotazioni Fantacalcio Serie A {season}</h1><p class='fco-hero__sub'>Lista aggiornata al {date}.</p><div class='fco-nota'>FantaIndex Rating: prestazioni attese. FantaIndex Titolarità: probabilità di scendere in campo sul torneo.</div><div id='quotations-dataset'>{entry}{entry if duplicate else ''}</div>"""
+
+
+def test_forecast_semantics_ranges_season_and_structure(tmp_path):
+    parsed = parse_forecast(forecast_html(), SEASON)
+    row = parsed["rows"][0]
+    assert parsed["source_date"] == "2026-09-19" and row["quotation"] == 17
+    assert (row["fantaindex_current"], row["fantaindex_potential"], row["season_availability_pct"]) == (6.6, 7.5, 70)
+    for html, message in ((forecast_html(season="2025/2026"), "season"), (forecast_html(date="99/09/2026"), "date"), (forecast_html(current="10.1"), "0-10"), (forecast_html(titularity="10.1"), "0-100"), (forecast_html(duplicate=True), "Duplicate"), (forecast_html().replace("prestazioni attese", "dato"), "semantics"), (forecast_html().replace("data-prop-name='pot'", "data-prop-name='changed'"), "structure")):
+        with pytest.raises(FcoIntelligenceError, match=message):
+            parse_forecast(html, SEASON)
+    class Profile:
+        profile_id = "test"
+        class season:
+            season = SEASON
+    snapshot = _check_forecast(tmp_path, Profile(), lambda _: forecast_html(), [], "2026-09-19T10:00:00+00:00")
+    assert snapshot["resolved"] == 0 and snapshot["unresolved_classifications"]["team_not_in_active_listone"] == 1
 
 
 def vote_table(caption, name, state="", votes=("6,5", "s.v.", "–"), bonus=""):
@@ -187,6 +211,20 @@ def test_cumulative_audit_separates_provisional_sync(tmp_path):
     assert _audit_performance(directory, parse_cumulative(cumulative_html(2), SEASON), players)["discrepancies"] == []
 
 
+def test_form_analytics_uses_final_rounds_and_numeric_votes_only():
+    identity = {"fantacalcio_id": 1, "canonical_name": "Malen", "canonical_team": "Roma", "canonical_role": "A"}
+    rows = [
+        {**identity, "matchday": 1, "started": True, "entered_from_bench": False, "did_not_enter": False, "minutes_played": 90, "vote_fc": {"state": "numeric", "value": 6}, "goals": 1, "assists": 0, "yellow_cards": 0, "red_cards": 0},
+        {**identity, "matchday": 2, "started": False, "entered_from_bench": True, "did_not_enter": False, "minutes_played": 20, "vote_fc": {"state": "sv", "value": None}, "goals": 0, "assists": 1, "yellow_cards": 1, "red_cards": 0},
+        {**identity, "matchday": 3, "started": False, "entered_from_bench": False, "did_not_enter": True, "minutes_played": 0, "vote_fc": {"state": "unpublished", "value": None}, "goals": 0, "assists": 0, "yellow_cards": 0, "red_cards": 0},
+    ]
+    provisional = {**rows[0], "matchday": 4, "vote_fc": {"state": "numeric", "value": 10}, "goals": 5}
+    result = form_analytics([{"state": "final", "matchday": 1, "players": rows}, {"state": "provisional", "matchday": 4, "players": [provisional]}])[0]
+    assert (result["final_appearances"], result["starts"], result["substitute_appearances"], result["minutes"]) == (2, 1, 1, 110)
+    assert result["numeric_fc_votes"] == 1 and result["mean_fc_vote"] == 6 and result["goals"] == 1 and result["assists"] == 1
+    assert result["last_3_sample_size"] == 1 and result["last_5_sample_size"] == 1 and result["provisional_matchdays"] == [4]
+
+
 def test_unresolved_identity_and_final_revision_are_traceable(tmp_path, performance_html):
     class Profile:
         profile_id = "test"
@@ -222,7 +260,7 @@ def test_price_cohorts_are_explicit_not_nearest():
     assert _benchmark_cohort(12) is None
 
 
-@pytest.mark.parametrize("source", ["market snapshot", "performance matchday 4", "lineup probability snapshot"])
+@pytest.mark.parametrize("source", ["market snapshot", "performance matchday 4", "lineup probability snapshot", "forecast snapshot"])
 def test_duplicate_canonical_identity_fails_closed_with_source_rows(source):
     rows = [{"fantacalcio_id": 1, "provider_name": "One", "provider_team": "Roma"}, {"fantacalcio_id": 1, "provider_name": "Two", "provider_team": "Roma"}]
     with pytest.raises(FcoIntelligenceError, match="One.*Two"):

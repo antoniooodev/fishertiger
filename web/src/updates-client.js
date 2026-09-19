@@ -140,9 +140,10 @@ export const checkAllUpdateSources = async (profile, options = {}) => {
       { label: "FCO Prestazioni", result: result.performance, error: result.errors?.performance },
       { label: "FCO Mercato", result: result.market, error: result.errors?.market },
       { label: "FCO Probabili", result: result.lineups, error: result.errors?.lineups },
+      { label: "FCO Indici", result: result.forecast, error: result.errors?.forecast },
     );
   } catch (error) {
-    for (const label of ["FCO Prestazioni", "FCO Mercato", "FCO Probabili"])
+    for (const label of ["FCO Prestazioni", "FCO Mercato", "FCO Probabili", "FCO Indici"])
       rows.push({ label, error: error?.message || "Controllo non riuscito" });
   }
   return rows;

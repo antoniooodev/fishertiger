@@ -1,4 +1,4 @@
-"""Authorized Fantacalcio Online P1 snapshots: performances, market and lineups."""
+"""Authorized Fantacalcio Online P1/P2 snapshots and analytics inputs."""
 from __future__ import annotations
 
 import hashlib
@@ -48,6 +48,7 @@ def lineup_url(season: str, matchday: int) -> str:
 CUMULATIVE_URL = f"{BASE}/serie-a/{{season}}/statistiche-bonus-malus"
 OWNERSHIP_URL = f"{BASE}/i-piu-comprati"
 PRICE_URL = f"{BASE}/asta-fantacalcio-stima-prezzi"
+FORECAST_URL = f"{BASE}/serie-a/{{season}}/quotazioni"
 
 
 def fetch_page(url: str) -> str:
@@ -335,6 +336,46 @@ def parse_prices(html: str, season: str) -> dict[str, object]:
     return {"source_date": source_date, "minimum_auctions": 3, "rows": rows}
 
 
+def parse_forecast(html: str, season: str) -> dict[str, object]:
+    soup = BeautifulSoup(html, "html.parser")
+    start, end = season_years(season)
+    if f"Serie A {start}/{end}" not in _text(soup.select_one("h1")):
+        raise FcoIntelligenceError("FCO forecast page season does not match the active profile.")
+    intro = _text(soup.select_one(".fco-hero__sub"))
+    found_date = re.search(r"aggiornata al (\d{2}/\d{2}/\d{4})", intro, re.I)
+    try:
+        source_date = datetime.strptime(found_date.group(1), "%d/%m/%Y").date().isoformat() if found_date else ""
+    except ValueError as error:
+        raise FcoIntelligenceError("FCO forecast source date is invalid.") from error
+    semantics = normalize(_text(soup.select_one(".fco-nota")))
+    if not source_date or "fantaindex rating" not in semantics or "prestazioni attese" not in semantics or "fantaindex titolarita" not in semantics or "probabilita di scendere in campo sul torneo" not in semantics:
+        raise FcoIntelligenceError("FCO forecast field semantics cannot be established.")
+    entries = soup.select("#quotations-dataset [data-entry]")
+    if not entries:
+        raise FcoIntelligenceError("FCO forecast player dataset is missing.")
+    required = {"id", "firstName", "lastName", "kapitals", "overall", "pot", "lineupRating"}
+    rows = []
+    for entry in entries:
+        player = entry.select_one('[data-prop-name="player"]')
+        team = entry.select_one('[data-prop-name="realteam"] [data-prop-name="name"]')
+        values = {item.get("data-prop-name"): _text(item) for item in player.select(":scope > [data-prop-name]")} if player else {}
+        if team is None or not required <= values.keys():
+            raise FcoIntelligenceError("FCO forecast player structure changed.")
+        current, potential = _number(values["pot"]), _number(values["overall"])
+        availability_scale, quotation = _number(values["lineupRating"]), _number(values["kapitals"])
+        if current is None or potential is None or not 0 <= current <= 10 or not 0 <= potential <= 10:
+            raise FcoIntelligenceError("FCO forecast rating is outside 0-10.")
+        availability = availability_scale * 10 if availability_scale is not None else None
+        if availability is None or not 0 <= availability <= 100:
+            raise FcoIntelligenceError("FCO forecast titularity is outside 0-100.")
+        if quotation is None or quotation < 0:
+            raise FcoIntelligenceError("FCO forecast quotation is invalid.")
+        rows.append({"provider_id": int(values["id"]), "provider_name": f"{values['lastName']} {values['firstName']}".strip(), "provider_team": _text(team), "quotation": int(quotation), "fantaindex_current": current, "fantaindex_potential": potential, "season_availability_pct": availability, "source_date": source_date})
+    if len({row["provider_id"] for row in rows}) != len(rows) or len({(normalize(row["provider_name"]), normalize(row["provider_team"])) for row in rows}) != len(rows):
+        raise FcoIntelligenceError("Duplicate player in FCO forecast source.")
+    return {"source_date": source_date, "rows": rows}
+
+
 def parse_lineups(html: str, season: str, matchday: int) -> dict[str, object]:
     soup = BeautifulSoup(html, "html.parser")
     data = _season_round(soup, season, matchday, "Probabili formazioni")
@@ -431,7 +472,7 @@ def _resolve(rows: list[dict[str, object]], players: list[dict[str, object]]) ->
             unresolved.append({**row, **identity, "unresolved_diagnostic": reason, "unresolved_classification": classification, "matching_method": match.get("method"), "details": {key: value for key, value in match.items() if key not in {"matched", "player"}}})
             continue
         player = match["player"]
-        resolved.append({**row, "fantacalcio_id": int(player["Id"]), "canonical_name": str(player["Nome"]), "canonical_team": str(player["Squadra"]), "matching_method": match["method"], **identity})
+        resolved.append({**row, "fantacalcio_id": int(player["Id"]), "canonical_name": str(player["Nome"]), "canonical_team": str(player["Squadra"]), "canonical_role": str(player["R"]), "matching_method": match["method"], **identity})
     return resolved, unresolved
 
 
@@ -515,7 +556,8 @@ def _status(root: Path, profile: object) -> dict[str, object]:
     performance = _read(_directory(root, profile, "performance-v1") / "index.json")
     market = _read(_directory(root, profile, "market-v1") / "latest.json")
     lineups = _read(_directory(root, profile, "lineup-probability-v1") / "latest.json")
-    return {"schema_version": "1.0", "provider": PROVIDER, "season": profile.season.season, "performance": performance, "market": market, "lineups": lineups}
+    forecast = _read(_directory(root, profile, "forecast-v1") / "latest.json")
+    return {"schema_version": "1.0", "provider": PROVIDER, "season": profile.season.season, "performance": performance, "market": market, "lineups": lineups, "forecast": forecast}
 
 
 def stored_status(root: Path, profile: object) -> dict[str, object]:
@@ -585,6 +627,27 @@ def _audit_performance(directory: Path, cumulative: list[dict[str, object]], pla
     return {"cumulative_rows": len(resolved), "unresolved": len(unresolved), "unresolved_classifications": _unresolved_summary(unresolved), "coverage": dict(coverage), "discrepancies": discrepancies, "pending_sync": pending_sync}
 
 
+def form_analytics(snapshots: list[dict[str, object]]) -> list[dict[str, object]]:
+    grouped: dict[int, dict[str, object]] = {}
+    for snapshot in snapshots:
+        for row in snapshot.get("players", []):
+            player_id = int(row["fantacalcio_id"])
+            target = grouped.setdefault(player_id, {"fantacalcio_id": player_id, "canonical_name": row["canonical_name"], "canonical_team": row["canonical_team"], "canonical_role": row.get("canonical_role"), "final_rows": [], "provisional_matchdays": []})
+            if snapshot.get("state") == "final":
+                target["final_rows"].append(row)
+            else:
+                target["provisional_matchdays"].append(int(snapshot["matchday"]))
+    result = []
+    for target in grouped.values():
+        rows = sorted(target.pop("final_rows"), key=lambda row: int(row["matchday"]))
+        appearances = [row for row in rows if row.get("started") or row.get("entered_from_bench")]
+        votes = [float(row["vote_fc"]["value"]) for row in rows if row.get("vote_fc", {}).get("state") == "numeric"]
+        def mean(values: list[float]) -> float | None:
+            return round(sum(values) / len(values), 2) if values else None
+        result.append({**target, "provisional_matchdays": sorted(set(target["provisional_matchdays"])), "final_appearances": len(appearances), "starts": sum(bool(row.get("started")) for row in appearances), "substitute_appearances": sum(bool(row.get("entered_from_bench")) for row in appearances), "minutes": sum(int(row["minutes_played"]) for row in appearances if isinstance(row.get("minutes_played"), (int, float))), "numeric_fc_votes": len(votes), "mean_fc_vote": mean(votes), "last_3_mean": mean(votes[-3:]), "last_3_sample_size": len(votes[-3:]), "last_5_mean": mean(votes[-5:]), "last_5_sample_size": len(votes[-5:]), **{event: sum(int(row[event]) for row in rows if isinstance(row.get(event), (int, float))) for event in ("goals", "assists", "yellow_cards", "red_cards")}})
+    return sorted(result, key=lambda row: row["fantacalcio_id"])
+
+
 def _check_performance(root: Path, profile: object, fetcher: FetchPage, players: list[dict[str, object]], checked_at: str, force: bool) -> dict[str, object]:
     latest_html = fetcher(performance_url(profile.season.season, "ultima"))
     soup = BeautifulSoup(latest_html, "html.parser")
@@ -606,7 +669,7 @@ def _check_performance(root: Path, profile: object, fetcher: FetchPage, players:
     snapshots = [existing or _store_performance(root, profile, parsed, matchday, checked_at, players) for matchday, existing, parsed in candidates]
     audit = _audit_performance(directory, cumulative, players)
     unresolved_rows = [item for row in snapshots for item in row["unresolved"]]
-    index = {"schema_version": "1.0", "provider": PROVIDER, "season": profile.season.season, "checked_at": checked_at, "latest_played_matchday": latest, "available_matchdays": len(snapshots), "final_matchdays": sum(row["state"] == "final" for row in snapshots), "provisional_matchdays": sum(row["state"] == "provisional" for row in snapshots), "resolved": sum(len(row["players"]) for row in snapshots), "unresolved": len(unresolved_rows), "unresolved_classifications": _unresolved_summary(unresolved_rows), "event_provenance": {"source": "round_page_player_metadata_tooltips", "match_detail_ingested": False}, "cumulative_audit": audit, "matchdays": [{"matchday": row["matchday"], "state": row["state"], "source_hash": row["source_hash"], "revision_count": len(row["revisions"])} for row in snapshots], "players": [player for row in snapshots for player in row["players"]]}
+    index = {"schema_version": "1.0", "provider": PROVIDER, "season": profile.season.season, "checked_at": checked_at, "latest_played_matchday": latest, "available_matchdays": len(snapshots), "final_matchdays": sum(row["state"] == "final" for row in snapshots), "provisional_matchdays": sum(row["state"] == "provisional" for row in snapshots), "resolved": sum(len(row["players"]) for row in snapshots), "unresolved": len(unresolved_rows), "unresolved_classifications": _unresolved_summary(unresolved_rows), "event_provenance": {"source": "round_page_player_metadata_tooltips", "match_detail_ingested": False}, "cumulative_audit": audit, "matchdays": [{"matchday": row["matchday"], "state": row["state"], "source_hash": row["source_hash"], "revision_count": len(row["revisions"])} for row in snapshots], "players": [player for row in snapshots for player in row["players"]], "form_analytics": form_analytics(snapshots)}
     _write(directory / "index.json", index)
     return index
 
@@ -645,6 +708,16 @@ def _check_market(root: Path, profile: object, fetcher: FetchPage, players: list
     return snapshot
 
 
+def _check_forecast(root: Path, profile: object, fetcher: FetchPage, players: list[dict[str, object]], checked_at: str) -> dict[str, object]:
+    source_url = FORECAST_URL.format(season=_slug(profile.season.season))
+    parsed = parse_forecast(fetcher(source_url), profile.season.season)
+    resolved, unresolved = _resolve(parsed["rows"], players)
+    _require_unique_canonical(resolved, "forecast snapshot")
+    snapshot = {"schema_version": "1.0", "provider": PROVIDER, "season": profile.season.season, "checked_at": checked_at, "source_url": source_url, "source_date": parsed["source_date"], "source_rows": len(parsed["rows"]), "resolved": len(resolved), "unresolved_classifications": _unresolved_summary(unresolved), "players": resolved, "unresolved": unresolved}
+    _write(_directory(root, profile, "forecast-v1") / "latest.json", snapshot)
+    return snapshot
+
+
 def _check_lineups(root: Path, profile: object, fetcher: FetchPage, players: list[dict[str, object]], checked_at: str, performance: dict[str, object]) -> dict[str, object]:
     latest = int(performance.get("latest_played_matchday", 0))
     current = next((row for row in performance.get("matchdays", []) if row.get("matchday") == latest), {})
@@ -672,6 +745,7 @@ def check_updates(root: Path, profile: object, fetcher: FetchPage = fetch_page, 
     for name, action in (
         ("performance", lambda: _check_performance(root, profile, fetcher, players, checked_at, force)),
         ("market", lambda: _check_market(root, profile, fetcher, players, checked_at)),
+        ("forecast", lambda: _check_forecast(root, profile, fetcher, players, checked_at)),
     ):
         if not force and _fresh(result.get(name), moment):
             continue

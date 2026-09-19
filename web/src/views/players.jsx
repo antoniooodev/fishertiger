@@ -268,7 +268,7 @@ export default function PlayersView({
       mark={mark}
       showMedia={showMedia}
       noteMaxLength={NOTE_MAX_LENGTH}
-      intelligence={p1PlayerViewModel(p1, player.id)}
+      intelligence={p1PlayerViewModel(p1, player.id, data.players, activeRules)}
       onToggleTarget={() =>
         updateNotes(withTarget(notes, player.id, !mark.target))
       }
@@ -710,37 +710,47 @@ export function PlayerIntelligence({ intelligence }) {
   const performance = intelligence?.performance || [];
   const market = intelligence?.market;
   const lineup = intelligence?.lineup;
+  const form = intelligence?.form;
+  const forecast = intelligence?.forecast;
+  const positioning = intelligence?.positioning;
   const compatible = market?.price_cohort_compatible;
   const price = compatible ? market?.market_price : market?.benchmark_market_price;
   const cohort = compatible ? market?.market_price_cohort : market?.benchmark_market_price_cohort;
   const sources = [["FC", lineup?.fc_pct], ["Gaz", lineup?.gaz_pct], ["SOS", lineup?.sos_pct], ["Sky", lineup?.sky_pct]];
   return <div className="p1-intelligence">
     <section>
-      <div className="section-head"><h2>Rendimento</h2>{Number.isFinite(intelligence?.averageFc) && <span>MV FC {intelligence.averageFc.toFixed(2)}</span>}</div>
-      {performance.length ? <div className="p1-performance">{performance.map((row) => <p key={row.matchday}>
-        <b>G{row.matchday}</b><strong>{voteLabel(row.vote_fc)}</strong><span>{row.venue === "HOME" ? "vs" : "@"} {row.opponent}</span><small>{appearanceLabel(row)}{row.goals ? ` · ⚽ ${row.goals}` : ""}{row.assists ? ` · A ${row.assists}` : ""}{row.yellow_cards ? " · 🟨" : ""}{row.red_cards ? " · 🟥" : ""}</small>
-      </p>)}</div> : <p className="micro">Prestazioni correnti non ancora disponibili.</p>}
+      <div className="section-head"><h2>Rendimento</h2>{Number.isFinite(form?.mean_fc_vote) && <span>MV FC {form.mean_fc_vote.toFixed(2)} · {form.numeric_fc_votes} voti</span>}</div>
+      {performance.length ? <div className="p2-timeline">{[...performance].reverse().map((row) => <div key={row.matchday} className={row.round_state === "provisional" ? "is-provisional" : ""}>
+        <small>G{row.matchday}{row.round_state === "provisional" ? " · provv." : ""}</small><strong>{row.did_not_enter ? "NP" : voteLabel(row.vote_fc)}</strong><span>{row.venue === "HOME" ? "vs" : "@"} {row.opponent}</span><em>{appearanceLabel(row)}{row.goals ? ` · ⚽${row.goals}` : ""}{row.assists ? ` · A${row.assists}` : ""}</em>
+      </div>)}</div> : <p className="micro">Prestazioni correnti non ancora disponibili.</p>}
+      {form && <dl className="p1-facts"><dt>Presenze finali</dt><dd>{form.final_appearances}</dd><dt>Minuti</dt><dd>{form.minutes}</dd><dt>Gol / assist</dt><dd>{form.goals} / {form.assists}</dd><dt>Ultime 3</dt><dd>{Number.isFinite(form.last_3_mean) ? form.last_3_mean.toFixed(2) : "—"} · n={form.last_3_sample_size}</dd><dt>Ultime 5</dt><dd>{Number.isFinite(form.last_5_mean) ? form.last_5_mean.toFixed(2) : "—"} · n={form.last_5_sample_size}</dd></dl>}
     </section>
     <section>
       <div className="section-head"><h2>Mercato</h2></div>
       {market ? <dl className="p1-facts">
         <dt>Comprato da</dt><dd>{Number.isFinite(market.ownership_pct) ? `${market.ownership_pct.toFixed(1)}%` : "campione insufficiente"}</dd>
         <dt>7 giorni</dt><dd>{Number.isFinite(market.ownership_delta_7d) ? `${market.ownership_delta_7d >= 0 ? "+" : ""}${market.ownership_delta_7d.toFixed(1)} pp` : "—"}</dd>
+        <dt>Percentile ownership</dt><dd>{Number.isFinite(positioning?.ownership_role_percentile) ? `${positioning.ownership_role_percentile}° · n=${positioning.ownership_sample_size}` : "—"}</dd>
         <dt>{compatible ? "Prezzo mercato" : "Benchmark FCO"}</dt><dd>{cohort ? (Number.isFinite(price?.value) ? price.value.toFixed(2) : market.new_player ? "Nuovo" : "—") : "Nessun benchmark singolo"}</dd>
         {cohort && <><dt>{compatible ? "Cohort" : "Benchmark FCO"}</dt><dd>{cohort.teams} squadre / {cohort.credits}</dd></>}
         {!compatible && <><dt>La tua lega</dt><dd>{market.active_league?.participants} squadre / {market.active_league?.credits} crediti</dd><dt>Confrontabilità</dt><dd>Non direttamente comparabile</dd></>}
         <dt>Ownership updated</dt><dd>{market.market_source_date}</dd>
         <dt>Prices updated</dt><dd>{market.price_source_date}</dd>
         <dt>Price season</dt><dd>{price?.fallback_previous_season ? `Prezzo ${price.price_season}` : price?.current_season ? price.price_season : "Non disponibile"}</dd>
+        <dt>Posizione modello</dt><dd>{Number.isFinite(positioning?.model_percentile) ? `${positioning.model_percentile}° percentile · n=${positioning.model_sample_size}` : "—"}</dd>
+        <dt>Posizione mercato</dt><dd>{Number.isFinite(positioning?.market_percentile) ? `${positioning.market_percentile}° percentile · n=${positioning.market_sample_size}` : "—"}</dd>
+        <dt>Gap modello/mercato</dt><dd>{Number.isFinite(positioning?.model_market_gap_pp) ? `${positioning.model_market_gap_pp >= 0 ? "+" : ""}${positioning.model_market_gap_pp} pp` : "—"}</dd>
       </dl> : <p className="micro">Mercato non ancora disponibile.</p>}
     </section>
     <section>
-      <div className="section-head"><h2>Prossima partita</h2></div>
+      <div className="section-head"><h2>Previsioni</h2></div>
+      {forecast ? <dl className="p1-facts"><dt>FCO Rating</dt><dd>{forecast.fantaindex_current.toFixed(1)}</dd><dt>FCO Potenziale</dt><dd>{forecast.fantaindex_potential.toFixed(1)} ({forecast.potential_gap >= 0 ? "+" : ""}{forecast.potential_gap.toFixed(1)})</dd><dt>FCO Titolarità stagione</dt><dd>{forecast.season_availability_pct.toFixed(0)}%</dd><dt>Fonte FCO</dt><dd>{forecast.source_date}</dd></dl> : <p className="micro">Indici FCO non ancora disponibili.</p>}
       {lineup ? <>
+        <h3 className="p2-subhead">Probabilità prossima partita</h3>
         <p className="p1-lineup-head"><b>{lineup.opponent} · {lineup.venue === "HOME" ? "casa" : "trasferta"}</b><strong>{Number.isFinite(lineup.weighted_pct) ? `${lineup.weighted_pct}%` : "—"}</strong></p>
         <div className="p1-sources">{sources.map(([label, value]) => <span key={label}><small>{label}</small><b>{Number.isFinite(value) ? value : "—"}</b></span>)}</div>
         <p className="micro">{lineup.source_count}/4 fonti · rilevazione {lineup.observation_at?.slice(0, 16).replace("T", " ")}</p>
-      </> : <p className="micro">Probabilità prossima giornata non ancora disponibile.</p>}
+      </> : <p className="micro">Probabilità prossima partita non disponibile.</p>}
     </section>
   </div>;
 }
