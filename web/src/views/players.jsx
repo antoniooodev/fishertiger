@@ -710,7 +710,9 @@ export function PlayerIntelligence({ intelligence }) {
   const performance = intelligence?.performance || [];
   const market = intelligence?.market;
   const lineup = intelligence?.lineup;
-  const price = market?.market_price;
+  const compatible = market?.price_cohort_compatible;
+  const price = compatible ? market?.market_price : market?.benchmark_market_price;
+  const cohort = compatible ? market?.market_price_cohort : market?.benchmark_market_price_cohort;
   const sources = [["FC", lineup?.fc_pct], ["Gaz", lineup?.gaz_pct], ["SOS", lineup?.sos_pct], ["Sky", lineup?.sky_pct]];
   return <div className="p1-intelligence">
     <section>
@@ -724,10 +726,12 @@ export function PlayerIntelligence({ intelligence }) {
       {market ? <dl className="p1-facts">
         <dt>Comprato da</dt><dd>{Number.isFinite(market.ownership_pct) ? `${market.ownership_pct.toFixed(1)}%` : "campione insufficiente"}</dd>
         <dt>7 giorni</dt><dd>{Number.isFinite(market.ownership_delta_7d) ? `${market.ownership_delta_7d >= 0 ? "+" : ""}${market.ownership_delta_7d.toFixed(1)} pp` : "—"}</dd>
-        <dt>Prezzo mercato</dt><dd>{Number.isFinite(price?.value) ? price.value.toFixed(2) : market.new_player ? "Nuovo" : "—"}</dd>
-        <dt>Campione</dt><dd>{market.market_price_cohort?.teams} squadre / {market.market_price_cohort?.credits}</dd>
-        <dt>Stagione prezzo</dt><dd>{price?.fallback_previous_season ? "Prezzo 2025/26" : price?.current_season ? price.price_season : "Non disponibile"}</dd>
-        <dt>Fonte</dt><dd>{market.market_source_date}</dd>
+        <dt>{compatible ? "Prezzo mercato" : "Benchmark FCO"}</dt><dd>{Number.isFinite(price?.value) ? price.value.toFixed(2) : market.new_player ? "Nuovo" : "—"}</dd>
+        <dt>{compatible ? "Cohort" : "Benchmark FCO"}</dt><dd>{cohort?.teams} squadre / {cohort?.credits}</dd>
+        {!compatible && <><dt>La tua lega</dt><dd>{market.active_league?.participants} squadre / {market.active_league?.credits} crediti</dd><dt>Confrontabilità</dt><dd>Non direttamente comparabile</dd></>}
+        <dt>Ownership updated</dt><dd>{market.market_source_date}</dd>
+        <dt>Prices updated</dt><dd>{market.price_source_date}</dd>
+        <dt>Price season</dt><dd>{price?.fallback_previous_season ? `Prezzo ${price.price_season}` : price?.current_season ? price.price_season : "Non disponibile"}</dd>
       </dl> : <p className="micro">Mercato non ancora disponibile.</p>}
     </section>
     <section>

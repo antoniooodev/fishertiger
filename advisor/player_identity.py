@@ -66,8 +66,6 @@ def _safe_names(value: object) -> set[str]:
     parts = name.replace("-", " ").split()
     if len(parts) > 1:
         variants.add(" ".join(reversed(parts)))
-        variants.add(f"{parts[0]} {parts[-1][0]}")
-        variants.add(f"{parts[-1]} {parts[0][0]}")
         if len(parts[-1]) == 1:
             variants.add(f"{parts[-1]} {' '.join(parts[:-1])}")
         if len(parts[0]) == 1:
@@ -128,6 +126,17 @@ def resolve_player(
     if len(variants) > 1:
         return _diagnostic("ambiguous", name, team, variants)
     source_tokens = set(normalize(clean_name).replace("-", " ").split())
+    initial_variants = []
+    for player in team_candidates:
+        candidate_tokens = normalize(player["Nome"]).replace("-", " ").split()
+        abbreviation = candidate_tokens[-1] if candidate_tokens and len(candidate_tokens[-1]) <= 2 else None
+        words = candidate_tokens[:-1] if abbreviation else candidate_tokens
+        if abbreviation and set(words) <= source_tokens and any(len(token) > len(abbreviation) and token.startswith(abbreviation) for token in source_tokens - set(words)):
+            initial_variants.append(player)
+    if len(initial_variants) == 1:
+        return {"matched": True, "player": initial_variants[0], "method": "safe_variant", "score": 100.0}
+    if len(initial_variants) > 1:
+        return _diagnostic("ambiguous", name, team, initial_variants)
     surname_only = [player for player in team_candidates if set(normalize(player["Nome"]).replace("-", " ").split()) <= source_tokens]
     if len(surname_only) == 1:
         return {"matched": True, "player": surname_only[0], "method": "safe_variant", "score": 100.0}

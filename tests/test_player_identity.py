@@ -25,6 +25,10 @@ def test_exact_accents_hyphens_and_surname_initial_variants():
     assert resolve("Martinez Jose", "Inter")["method"] == "exact"
     assert resolve("C. De Ketelaere", "Atalanta")["method"] == "safe_variant"
     assert resolve("Rossi", "Milan")["reason"] == "ambiguous"
+    roma = [{"Id": 6, "Nome": "De Marzi", "Squadra": "Roma"}]
+    assert not resolve_player("De Roon Marten", "Roma", roma, source="test")["matched"]
+    milan = [{"Id": 7, "Nome": "Terracciano", "Squadra": "Milan"}, {"Id": 8, "Nome": "Terracciano F.", "Squadra": "Milan"}]
+    assert resolve_player("Terracciano Filippo", "Milan", milan, source="test")["player"]["Id"] == 8
 
 
 def test_fuzzy_margin_threshold_and_below_threshold_are_conservative():

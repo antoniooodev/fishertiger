@@ -9,8 +9,8 @@ const status = {
     { fantacalcio_id: 1, matchday: 2, venue: "AWAY", opponent: "Roma", entered_from_bench: true, minutes_played: 8, vote_fc: { state: "sv", value: null }, goals: null, assists: null, yellow_cards: null, red_cards: null },
     { fantacalcio_id: 1, matchday: 1, did_not_enter: true, vote_fc: { state: "unpublished", value: null } },
   ] },
-  market: { players: [{ fantacalcio_id: 1, ownership_pct: 17.2, ownership_delta_7d: -2.9, market_price_cohort: { teams: 8, credits: 500 }, market_price: { value: 71.62, fallback_previous_season: true, price_season: "2025/26" } }] },
-  lineups: { players: [{ fantacalcio_id: 1, weighted_pct: 69, fc_pct: 60, gaz_pct: 90, sos_pct: null, sky_pct: 90, source_count: 3 }] },
+  market: { players: [{ fantacalcio_id: 1, ownership_pct: 17.2, ownership_delta_7d: -2.9, price_cohort_compatible: true, market_source_date: "2026-09-18", price_source_date: "2026-09-17", market_price_cohort: { teams: 8, credits: 500 }, market_price: { value: 71.62, fallback_previous_season: true, price_season: "2025/26" } }] },
+  lineups: { matchday: 4, players: [{ fantacalcio_id: 1, matchday: 4, weighted_pct: 69, fc_pct: 60, gaz_pct: 90, sos_pct: null, sky_pct: 90, source_count: 3 }] },
 };
 
 test("builds current performance, market cohort and next-matchday source detail", () => {
@@ -19,8 +19,15 @@ test("builds current performance, market cohort and next-matchday source detail"
   assert.equal(view.totals.goals, 1);
   assert.equal(view.market.market_price_cohort.teams, 8);
   assert.equal(view.market.market_price.fallback_previous_season, true);
+  assert.equal(view.market.market_source_date, "2026-09-18");
+  assert.equal(view.market.price_source_date, "2026-09-17");
   assert.equal(view.lineup.weighted_pct, 69);
   assert.equal(view.lineup.sos_pct, null);
+});
+
+test("does not expose a stale previous-round lineup for an empty upcoming round", () => {
+  const stale = { ...status, lineups: { matchday: 5, active_source_count: 0, evaluated_players: 0, players: [{ ...status.lineups.players[0], matchday: 4 }] } };
+  assert.equal(p1PlayerViewModel(stale, 1).lineup, null);
 });
 
 test("keeps s.v., unpublished and absence distinct", () => {

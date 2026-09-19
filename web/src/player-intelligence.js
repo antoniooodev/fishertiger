@@ -8,7 +8,7 @@ export const p1PlayerViewModel = (snapshot, playerId) => {
     .map((row) => row.vote_fc?.state === "numeric" ? row.vote_fc.value : null)
     .filter(Number.isFinite);
   const market = (snapshot?.market?.players || []).find((row) => id(row.fantacalcio_id) === id(playerId)) || null;
-  const lineup = (snapshot?.lineups?.players || []).find((row) => id(row.fantacalcio_id) === id(playerId)) || null;
+  const lineup = (snapshot?.lineups?.players || []).find((row) => id(row.fantacalcio_id) === id(playerId) && row.matchday === snapshot?.lineups?.matchday) || null;
   return {
     performance: performance.slice(0, 5),
     averageFc: numeric.length ? numeric.reduce((sum, value) => sum + value, 0) / numeric.length : null,

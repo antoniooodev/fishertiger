@@ -7,7 +7,11 @@ from advisor.fco_intelligence import (
     FcoIntelligenceError,
     _audit_performance,
     _check_performance,
+    _price_cohort,
+    _require_unique_canonical,
+    _store_market,
     _store_performance,
+    _unresolved_summary,
     _write,
     parse_cumulative,
     parse_lineups,
@@ -53,8 +57,12 @@ def test_performance_votes_context_events_and_provisional(performance_html):
     assert starter["penalties_scored"] is None
     unfinished = performance_html.replace("Terminata", "Non iniziata", 1)
     assert parse_performance(unfinished, SEASON, 3)["state"] == "provisional"
+    empty_unstarted = unfinished.replace("<section class='prb-squadra'>", "<section class='removed'>", 2)
+    assert len(parse_performance(empty_unstarted, SEASON, 3)["fixtures"]) == 10
     postponed = performance_html.replace("Terminata", "Rinviata", 1)
     assert parse_performance(postponed, SEASON, 3)["state"] == "provisional"
+    typo = parse_performance(performance_html.replace("1 Assist Intenzionale", "2 Assit da Fermo", 1), SEASON, 3)
+    assert typo["records"][1]["assists"] == 2
 
 
 def ownership_html(*, cohort="", pct="17,2%", delta="-2,9"):
@@ -80,7 +88,7 @@ def price_html(badge="", prices=("71.62", "72", "95", "99")):
     dataset = {"@type": "Dataset", "name": "Prezzi medi d'asta del fantacalcio 2025/2026", "dateModified": "2026-09-18", "measurementTechnique": "soglia minima di 3 aste per calciatore", "size": {"value": 1}}
     name = f"<span class='text-bold'>MALEN</span><span class='text-muted'>Donyell</span>{badge}"
     headers = ['Ruolo','Squadra','Nome','Kap.','8 sq. / 350','10 sq. / 350','8 sq. / 500','10 sq. / 500','M.V.','Pres.']
-    return f"""<script type='application/ld+json'>{json.dumps(dataset)}</script><table id='players_list'><thead><tr>{''.join(f'<th>{h}</th>' for h in headers)}</tr></thead><tbody><tr><td>A</td><td>Roma</td><td>{name}</td><td>62</td>{''.join(f'<td>{x}</td>' for x in prices)}<td>6,2</td><td>30</td></tr></tbody></table>"""
+    return f"""<script type='application/ld+json'>{json.dumps(dataset)}</script><p class='fco-occhiello'>Asta 2026/2027</p><table id='players_list'><thead><tr>{''.join(f'<th>{h}</th>' for h in headers)}</tr></thead><tbody><tr><td>A</td><td>Roma</td><td>{name}</td><td>62</td>{''.join(f'<td>{x}</td>' for x in prices)}<td>6,2</td><td>30</td></tr></tbody></table>"""
 
 
 def test_prices_current_fallback_new_blank_and_four_cohorts():
@@ -93,6 +101,8 @@ def test_prices_current_fallback_new_blank_and_four_cohorts():
     assert new["new_player"] and new["price_10_500"]["unavailable"]
     with pytest.raises(FcoIntelligenceError, match="three-auction"):
         parse_prices(price_html().replace("soglia minima di 3 aste", "soglia minima di 10 aste"), SEASON)
+    with pytest.raises(FcoIntelligenceError, match="season"):
+        parse_prices(price_html("<span class='fco-etichetta'>2025/2026</span>").replace("Asta 2026/2027", "Asta 2025/2026"), SEASON)
 
 
 def lineup_table(caption, name, values=("60%", "90%", "–", "90%", "69%"), official=False):
@@ -129,6 +139,18 @@ def test_lineups_sources_weighted_sections_and_official(lineups_html):
     assert parse_lineups(changed, SEASON, 5)["observation_at"].endswith("19:00:00+02:00")
 
 
+def test_lineups_accept_valid_zero_source_matchday():
+    panes = []
+    for index in range(10):
+        header = f"<header class='prb-incontro'><a class='prb-incontro__nome'>Home{index}</a><p class='prb-incontro__stato'>Non iniziata</p><p class='prb-incontro__data'>2{index}/09/2026 20:45</p><a class='prb-incontro__nome'>Away{index}</a></header>"
+        teams = "".join(f"<section class='prb-squadra'><h2 class='prb-squadra__nome'>{side}{index}</h2></section>" for side in ("Home", "Away"))
+        panes.append(f"<div class='tab-pane'>{header}{teams}</div>")
+    dataset = {"@type": "Dataset", "name": "Probabili formazioni 5ª giornata di Serie A 2026/2027", "dateModified": "2026-09-18T08:00:00+02:00"}
+    html = f"<script type='application/ld+json'>{json.dumps(dataset)}</script><p>Ultima rilevazione: 18 settembre 2026 alle 08:00. Per questa giornata hanno pubblicato <b>0 redazioni su 4</b> per un totale di <b>0 calciatori</b> valutati.</p>{''.join(panes)}"
+    parsed = parse_lineups(html, SEASON, 5)
+    assert len(parsed["fixtures"]) == 10 and parsed["rows"] == [] and parsed["source_state"] == "awaiting_sources"
+
+
 def cumulative_html(assists=2):
     headers = ["RT", "Squadra", "Nome", "Kap.", "PR", "MV5", "FM5", "", "GR+", "GR-", "RG+", "A+", "AF+", "PD+", "P/T", "EG-", "ET-", "RC-"]
     values = ["A", "Roma", "Malen", "62", "", "", "", "", "0", "0", "0", str(assists), "0", "0", "0", "0", "0", "0"]
@@ -144,7 +166,7 @@ def test_cumulative_cross_check_discrepancy(tmp_path):
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps(snapshot))
     audit = _audit_performance(directory, rows, players)
-    assert audit["discrepancies"] == [{"fantacalcio_id": 1, "metric": "assists", "matchdays": 1, "cumulative": 2}]
+    assert audit["discrepancies"] == [{"fantacalcio_id": 1, "canonical_name": "Malen", "canonical_team": "Roma", "metric": "assists", "matchdays": 1, "cumulative": 2}]
 
 
 def test_unresolved_identity_and_final_revision_are_traceable(tmp_path, performance_html):
@@ -162,12 +184,33 @@ def test_unresolved_identity_and_final_revision_are_traceable(tmp_path, performa
 
 
 def test_daily_market_history_is_immutable_and_not_duplicated(tmp_path):
-    path = tmp_path / "history/2026-09-18.json"
-    _write(path, {"source_date": "2026-09-18", "players": []}, immutable=True)
-    _write(path, {"source_date": "2026-09-18", "players": []}, immutable=True)
-    assert [item.name for item in path.parent.iterdir()] == ["2026-09-18.json"]
-    with pytest.raises(FcoIntelligenceError, match="Immutable"):
-        _write(path, {"source_date": "2026-09-18", "players": [1]}, immutable=True)
+    first = {"checked_at": "one", "market_source_date": "2026-09-18", "price_source_date": "2026-09-17", "players": []}
+    _store_market(tmp_path, first)
+    _store_market(tmp_path, {**first, "checked_at": "two"})
+    assert len(list((tmp_path / "history").iterdir())) == 1
+    second = {**first, "checked_at": "three", "price_source_date": "2026-09-18", "players": [1]}
+    _store_market(tmp_path, second)
+    assert len(list((tmp_path / "history").iterdir())) == 2
+    assert json.loads((tmp_path / "latest.json").read_text())["price_source_date"] == "2026-09-18"
+
+
+def test_price_cohorts_are_explicit_not_nearest():
+    assert _price_cohort(8, 400)[0]["field"] == "price_8_350"
+    assert _price_cohort(9, 440)[0]["field"] == "price_10_500"
+    assert _price_cohort(8, 750)[0] is None
+    assert "750 credits" in _price_cohort(8, 750)[1]
+
+
+@pytest.mark.parametrize("source", ["market snapshot", "performance matchday 4", "lineup probability snapshot"])
+def test_duplicate_canonical_identity_fails_closed_with_source_rows(source):
+    rows = [{"fantacalcio_id": 1, "provider_name": "One", "provider_team": "Roma"}, {"fantacalcio_id": 1, "provider_name": "Two", "provider_team": "Roma"}]
+    with pytest.raises(FcoIntelligenceError, match="One.*Two"):
+        _require_unique_canonical(rows, source)
+
+
+def test_unresolved_classification_summary():
+    summary = _unresolved_summary([{"unresolved_classification": "outside_active_listone"}, {"unresolved_classification": "ambiguous"}])
+    assert summary == {"outside_active_listone": 1, "fuzzy_requires_confirmation": 0, "ambiguous": 1, "team_not_in_active_listone": 0, "other": 0}
 
 
 def test_finalized_rounds_are_not_refetched_during_normal_updates(tmp_path, performance_html):
